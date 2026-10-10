@@ -25,6 +25,7 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/quotas/quotas.go` | +7 lines: `TypeLeaseCount` in type list, `String()`, `leaseRecords` map init/reset, parse case | Adds the lease-count quota type to the existing quota manager | — |
 | `internal/vault/expiration.go` | +11 lines: quota-check call at lease registration, error mapping | Enforcement: reject lease issuance when quota exhausted | — |
 | `internal/vault/request_handling.go` | +17 lines: `checkBatchLeaseQuota` calls at auth/secret lease creation, error mapping to `logical.ErrLeaseCountQuotaExceeded` | Enforcement: batch/auth lease paths respect lease-count quotas | — |
+| `internal/vault/logical_system.go` | ha-status response: added capitalized `Nodes` array (same entries as legacy lowercase `nodes`) with `redundancy_zone` string (empty default; raft lib exposes no zone metadata) | Documented Vault Enterprise /sys/ha-status shape (api-docs/system/ha-status, v2.x (latest)); lowercase `nodes` unchanged for OpenBao back-compat | — |
 
 ### Step-up MFA (compat-harness branch)
 

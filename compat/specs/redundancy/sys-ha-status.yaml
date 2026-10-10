@@ -1,0 +1,33 @@
+api: redundancy-sys-ha-status
+feature: redundancy
+source: https://developer.hashicorp.com/vault/api-docs/system/ha-status
+source_version: "v2.x (latest)"
+notes: >
+  Documentation-derived response-shape check, not a failover test. The sample
+  has a top-level capitalized Nodes array and a redundancy_zone string on
+  every node, explicitly marked Enterprise-only. An empty string is allowed;
+  the docs do not guarantee a specific value for an unconfigured node.
+  Requires an authenticated target that supports HA status. The docs do not
+  establish success for a non-HA in-memory dev server. No cluster size or
+  non-empty zone is asserted. Empty Nodes vacuously satisfies the item check.
+  A 200 response with nodes missing redundancy_zone is FAIL, not FEATURE_ABSENT;
+  the v1 harness only classifies a non-accepted 404 as FEATURE_ABSENT.
+cases:
+  - id: ha-status-node-redundancy-zone-shape
+    request:
+      method: GET
+      path: /v1/sys/ha-status
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [Nodes]
+        properties:
+          Nodes:
+            type: array
+            items:
+              type: object
+              required: [redundancy_zone]
+              properties:
+                redundancy_zone:
+                  type: string

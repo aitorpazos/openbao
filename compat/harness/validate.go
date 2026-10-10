@@ -21,7 +21,7 @@ func checkSchema(s map[string]any) error {
 	for k, v := range s {
 		switch k {
 		case "type":
-			if v != "object" && v != "string" && v != "number" && v != "boolean" && v != "array" && v != "null" {
+			if v != "object" && v != "string" && v != "number" && v != "integer" && v != "boolean" && v != "array" && v != "null" {
 				return fmt.Errorf("unsupported schema type %v", v)
 			}
 		case "properties":
@@ -81,7 +81,7 @@ func validate(s map[string]any, v any, path string) error {
 			_, match = v.(map[string]any)
 		case "array":
 			_, match = v.([]any)
-		case "number":
+		case "number", "integer":
 			_, match = v.(float64)
 		case "boolean":
 			_, match = v.(bool)

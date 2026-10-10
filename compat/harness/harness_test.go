@@ -63,7 +63,7 @@ func TestValidator(t *testing.T) {
 	}
 }
 func TestSchemaErrors(t *testing.T) {
-	for _, s := range []string{`{type: integer}`, `{pattern: '['}`, `{required: [1]}`, `{items: []}`, `{properties: {x: 1}}`, `{unknown: true}`} {
+	for _, s := range []string{`{pattern: '['}`, `{required: [1]}`, `{items: []}`, `{properties: {x: 1}}`, `{unknown: true}`} {
 		t.Run(s, func(t *testing.T) {
 			var m map[string]any
 			yaml.Unmarshal([]byte(s), &m)

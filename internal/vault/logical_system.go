@@ -4651,11 +4651,26 @@ func (b *SystemBackend) handleHAStatus(ctx context.Context, req *logical.Request
 		return nil, err
 	}
 
+	// Preserve the legacy entries while exposing the documented Enterprise shape.
+	compatNodes := make([]haStatusCompatNode, len(nodes))
+	for i, node := range nodes {
+		compatNodes[i] = haStatusCompatNode{HAStatusNode: node}
+	}
+
 	return &logical.Response{
 		Data: map[string]any{
 			"nodes": nodes,
+			"Nodes": compatNodes,
 		},
 	}, nil
+}
+
+// haStatusCompatNode adds redundancy_zone only to the capitalized Nodes array.
+// OpenBao's Raft LocalNodeConfigValue has no redundancy-zone metadata, so the
+// zone remains an explicit empty string for both Raft and non-Raft nodes.
+type haStatusCompatNode struct {
+	HAStatusNode
+	RedundancyZone string `json:"redundancy_zone"`
 }
 
 type HAStatusNode struct {

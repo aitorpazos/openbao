@@ -1,0 +1,33 @@
+api: redundancy-sys-raft-autopilot-state
+feature: redundancy
+source: https://developer.hashicorp.com/vault/api-docs/system/storage/raftautopilot
+source_version: "v2.x (latest)"
+notes: >
+  Run only against initialized, unsealed Integrated Storage with root-namespace
+  access and permission to read Autopilot state; not a generic in-memory dev
+  smoke test. Uses the top-level shape shown in the API page, not an invented
+  data envelope. Enterprise output includes optimistic_failure_tolerance.
+  No exact count or zone name is prescribed. redundancy_zones is checked when
+  present, not required: the sample has configured zones and does not define
+  omission behavior without zones. Dynamic zone-map member schemas cannot be
+  enforced with v1 additionalProperties (ignored by this harness).
+cases:
+  - id: autopilot-enterprise-optimistic-tolerance-shape
+    request:
+      method: GET
+      path: /v1/sys/storage/raft/autopilot/state
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [optimistic_failure_tolerance]
+        properties:
+          optimistic_failure_tolerance:
+            type: integer
+          redundancy_zones:
+            type: object
+          upgrade_info:
+            type: object
+            properties:
+              redundancy_zones:
+                type: object
