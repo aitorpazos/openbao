@@ -15,7 +15,7 @@ import (
 
 // Named step-up configurations are separate from identity login MFA methods.
 // Storage uses the system barrier view and configuration access is ACL-controlled.
-// Enrollment and enforcement are deliberately not performed by these endpoints.
+// Enrollment is handled separately from configuration CRUD and enforcement.
 const namedMFAMethodPrefix = "mfa/named-methods/"
 
 type namedMFAMethodLock struct{ sync.Mutex }
@@ -62,7 +62,7 @@ func (b *SystemBackend) namedMFAMethodPaths() []*framework.Path {
 			HelpSynopsis: "Manage a named step-up MFA method configuration in the root namespace.",
 		})
 	}
-	return paths
+	return append(paths, b.namedMFATOTPEnrollmentPaths()...)
 }
 
 func (b *SystemBackend) handleNamedMFAMethod(ctx context.Context, req *logical.Request, d *framework.FieldData, kind string) (*logical.Response, error) {
