@@ -160,6 +160,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	b.Paths = append(b.Paths, b.hostInfoPath())
 	b.Paths = append(b.Paths, b.quotasPaths()...)
 	b.Paths = append(b.Paths, b.loginMFAPaths()...)
+	b.Paths = append(b.Paths, b.namedMFAMethodPaths()...)
 	b.Paths = append(b.Paths, b.introspectionPaths()...)
 	b.Paths = append(b.Paths, b.workflowPaths()...)
 	b.Paths = append(b.Paths, b.externalKeysPaths()...)
@@ -191,8 +192,9 @@ func (b *SystemBackend) rawPaths() []*framework.Path {
 // prefix. Conceptually it is similar to procfs on Linux.
 type SystemBackend struct {
 	*framework.Backend
-	Core   *Core
-	logger log.Logger
+	namedMFAMethodLock namedMFAMethodLock
+	Core               *Core
+	logger             log.Logger
 }
 
 // handleConfigStateSanitized returns the current configuration state. The configuration

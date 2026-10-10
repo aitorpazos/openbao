@@ -1,0 +1,34 @@
+api: sys-mfa-totp-admin-generate
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/system/mfa/totp#administratively-generate-a-totp-mfa-secret
+source_version: "v2.x (latest)"
+notes: >-
+  POST /sys/mfa/method/totp/:name/admin-generate requires name (path string)
+  and entity_id (body string). This negative deliberately supplies a name but
+  omits entity_id. No entity-backed token or entity fixture is needed to express
+  this invalid request. HTTP 400 and the errors array derive from the general
+  API convention https://developer.hashicorp.com/vault/api-docs (missing or
+  invalid data), not an endpoint-specific error example. Validation order versus
+  lookup of the deliberately unconfigured name is not specified; this is a
+  required-input conformance expectation, not an observed server result.
+  Positive enrollment is deferred to a configured named TOTP method plus an
+  existing target entity, adequate administrative ACL permissions, and the same
+  namespace for admin and entity per
+  https://developer.hashicorp.com/vault/docs/enterprise/mfa . The administrator's
+  token need not itself be entity-backed according to this endpoint: unlike GET
+  generate, the target is supplied explicitly. Success samples contain
+  data.barcode and data.url strings. See stepup-enforcement-notes.md for the
+  separately deferred generate and ambiguous admin-destroy endpoints.
+cases:
+  - id: missing-entity-id
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/totp/qa-stepup-enrollment-missing-entity/admin-generate
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
