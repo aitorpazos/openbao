@@ -1296,6 +1296,9 @@ func (c *Core) configureLogicalBackends(backends map[string]logical.Factory, log
 		logicalBackends[routing.MountTypeKV] = PassthroughBackendFactory
 	}
 
+	// Transform configuration resources.
+	logicalBackends["transform"] = TransformBackendFactory
+
 	// Cubbyhole
 	logicalBackends[routing.MountTypeCubbyhole] = CubbyholeBackendFactory
 	logicalBackends[routing.MountTypeNSCubbyhole] = func(ctx context.Context, config *logical.BackendConfig) (logical.Backend, error) {
