@@ -1,0 +1,94 @@
+api: sys-mounts-sealwrap
+feature: sealwrap
+source: https://developer.hashicorp.com/vault/api-docs/system/mounts
+source_version: "v2.x (latest)"
+notes: >-
+  seal_wrap is documented as a mount-create parameter (bool, default false)
+  under the note that the option is accepted in open-source but its
+  functionality is supported only in Vault Enterprise. The mount list and
+  single-mount response samples carry seal_wrap as a boolean directly on each
+  mount entry. The feature page (developer.hashicorp.com/vault/docs/enterprise/sealwrap,
+  v2.x (latest)) says the value cannot be changed after mount time, and the
+  tune parameters on the mounts API page do not list seal_wrap. These specs
+  exercise the community API surface only: accept, persist, report. Actual
+  value wrapping requires a supporting seal (Enterprise Plus / HSM class) and
+  is not asserted here.
+cases:
+  - id: create-sealwrap-true
+    request:
+      method: POST
+      path: /v1/sys/mounts/compat-sealwrap-kv
+      body:
+        type: kv
+        options:
+          version: "1"
+        seal_wrap: true
+    expect:
+      status: 204
+      body: null
+  - id: read-mount-sealwrap-true
+    depends: [create-sealwrap-true]
+    request:
+      method: GET
+      path: /v1/sys/mounts/compat-sealwrap-kv
+    expect:
+      status: 200
+      exact:
+        data.seal_wrap: true
+        data.type: kv
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [accessor, uuid, seal_wrap, type]
+            properties:
+              seal_wrap: {type: boolean}
+              type: {const: kv}
+  - id: create-default-false
+    request:
+      method: POST
+      path: /v1/sys/mounts/compat-sealwrap-kv-default
+      body:
+        type: kv
+        options:
+          version: "1"
+    expect:
+      status: 204
+      body: null
+  - id: read-mount-default-false
+    depends: [create-default-false]
+    request:
+      method: GET
+      path: /v1/sys/mounts/compat-sealwrap-kv-default
+    expect:
+      status: 200
+      exact:
+        data.seal_wrap: false
+        data.type: kv
+  - id: list-includes-sealwrap-true
+    depends: [create-sealwrap-true]
+    request:
+      method: GET
+      path: /v1/sys/mounts
+    expect:
+      status: 200
+      exact:
+        data.compat-sealwrap-kv/.seal_wrap: true
+  - id: cleanup-delete-true
+    depends: [read-mount-sealwrap-true]
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/compat-sealwrap-kv
+    expect:
+      status: 204
+      body: null
+  - id: cleanup-delete-default
+    depends: [read-mount-default-false]
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/compat-sealwrap-kv-default
+    expect:
+      status: 204
+      body: null

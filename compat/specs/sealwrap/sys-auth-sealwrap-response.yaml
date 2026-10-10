@@ -1,0 +1,33 @@
+api: sys-auth-sealwrap-response
+feature: sealwrap
+source: https://developer.hashicorp.com/vault/api-docs/system/auth
+source_version: "v2.x (latest)"
+notes: >-
+  The /sys/auth list response sample carries seal_wrap as a boolean directly on
+  each auth-mount entry (false for the pre-provisioned github/ and token/
+  mounts in the sample). The /sys/auth create parameters do NOT document a
+  seal_wrap field, so per clean-room discipline no create-with-seal_wrap case
+  is written for auth mounts; this spec asserts response shape only, on the
+  always-present token mount. Value wrapping itself requires a supported seal
+  (Enterprise Plus / HSM class) and is not asserted.
+cases:
+  - id: auth-list-includes-sealwrap-field
+    request:
+      method: GET
+      path: /v1/sys/auth
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: ["token/"]
+            properties:
+              "token/":
+                type: object
+                required: [seal_wrap, type]
+                properties:
+                  seal_wrap: {type: boolean}
+                  type: {const: token}
