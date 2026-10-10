@@ -1568,6 +1568,9 @@ func (c *Core) handleRequest(ctx context.Context, req *logical.Request) (retResp
 			leaseID, err := c.expiration.Register(ctx, req, resp, "")
 			if err != nil {
 				c.logger.Error("failed to register lease", "request_path", req.Path, "error", err)
+				if isLeaseCountQuotaError(err) {
+					return nil, auth, logical.ErrLeaseCountQuotaExceeded
+				}
 				retErr = multierror.Append(retErr, ErrInternalError)
 				return nil, auth, retErr
 			}
@@ -1641,6 +1644,9 @@ func (c *Core) handleRequest(ctx context.Context, req *logical.Request) (retResp
 
 			switch resp.Auth.TokenType {
 			case logical.TokenTypeBatch:
+				if err := c.checkBatchLeaseQuota(ctx, resp.Auth.CreationPath, ""); err != nil {
+					return nil, auth, err
+				}
 			case logical.TokenTypeService:
 				registeredTokenEntry := &logical.TokenEntry{
 					TTL:         auth.TTL,
@@ -1657,6 +1663,9 @@ func (c *Core) handleRequest(ctx context.Context, req *logical.Request) (retResp
 						c.logger.Warn("failed to clean up token lease during auth/token/ request", "request_path", req.Path, "error", err)
 					}
 					c.logger.Error("failed to register token lease during auth/token/ request", "request_path", req.Path, "error", err)
+					if isLeaseCountQuotaError(err) {
+						return nil, auth, logical.ErrLeaseCountQuotaExceeded
+					}
 					retErr = multierror.Append(retErr, ErrInternalError)
 					return nil, auth, retErr
 				}
@@ -2166,7 +2175,7 @@ func (c *Core) LoginCreateToken(ctx context.Context, ns *namespace.Namespace, re
 		if auth.TokenType != logical.TokenTypeBatch {
 			leaseGenerated = true
 		}
-	case ErrInternalError:
+	case ErrInternalError, logical.ErrLeaseCountQuotaExceeded:
 		return false, nil, err
 	default:
 		return false, logical.ErrorResponse(err.Error()), logical.ErrInvalidRequest
@@ -2509,6 +2518,9 @@ func (c *Core) RegisterAuth(ctx context.Context, tokenTTL time.Duration, path st
 
 	switch auth.TokenType {
 	case logical.TokenTypeBatch:
+		if err := c.checkBatchLeaseQuota(ctx, path, role); err != nil {
+			return nil, err
+		}
 		// Ensure it's not marked renewable since it isn't
 		auth.Renewable = false
 	case logical.TokenTypeService:
@@ -2518,6 +2530,9 @@ func (c *Core) RegisterAuth(ctx context.Context, tokenTTL time.Duration, path st
 				c.logger.Warn("failed to clean up token lease during login request", "request_path", path, "error", err)
 			}
 			c.logger.Error("failed to register token lease during login request", "request_path", path, "error", err)
+			if isLeaseCountQuotaError(err) {
+				return nil, logical.ErrLeaseCountQuotaExceeded
+			}
 			return nil, ErrInternalError
 		}
 		if te.ExternalID != "" {

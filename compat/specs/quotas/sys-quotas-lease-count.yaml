@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-quotas-lease-count
+feature: lease-count-quotas
+source: https://developer.hashicorp.com/vault/api-docs/system/lease-count-quotas
+source_version: "2.x"
+notes: >
+  Public documentation: POST/GET/DELETE /sys/quotas/lease-count/:name;
+  LIST /sys/quotas/lease-count (404 when empty). Fields are name (URL),
+  path (default empty/global), max_leases (required integer), role (default
+  empty), inheritable (default false except root namespace). No disable field
+  is documented, so it is deliberately not specified here. Paths select a
+  namespace, mount, exact suffix, or trailing-glob suffix. Roles require a
+  role-aware auth mount. Inheritable is only valid for namespace quotas and
+  applies cumulatively to descendants. Non-global quotas are not inherited
+  otherwise. Only root or administrative namespaces may access the endpoint;
+  modifications may not target parent/sibling namespaces. Listing spans all
+  namespaces. Creation populates existing lease counts even above max_leases;
+  changing path moves the quota. The API page does not define exact exhausted
+  error text, status, lease categories, renewal behavior, or issuance pressure
+  point. Implementation uses the existing OpenBao lease count quota exceeded
+  error and expiration-manager registered leases; this is an implementation
+  choice, not a claimed documented wire contract. Success status conventions
+  and missing-required-field 400 follow the public HTTP API conventions at
+  https://developer.hashicorp.com/vault/api-docs. Lifecycle documentation at
+  https://developer.hashicorp.com/vault/docs/enterprise/lease-count-quotas
+  additionally specifies HTTP 429 on exhaustion, root-token exemption, and
+  batch-token admission checks without counting batch tokens. Revocation or
+  expiration releases capacity. Role, exact path, longest prefix glob, mount,
+  closest namespace, then global determine precedence; inherited namespace
+  quotas count cumulatively. The documented Enterprise installation default
+  of 300000 is not automatically installed by this OpenBao implementation.
+  Error text uses OpenBao's existing lease count quota exceeded sentinel.
+cases:
+  - id: lease-quota-missing-max
+    request: {method: POST, path: /v1/sys/quotas/lease-count/compat-lease, body: {}}
+    expect: {status: 400}
+  - id: lease-quota-invalid-inheritance
+    request: {method: POST, path: /v1/sys/quotas/lease-count/compat-invalid, body: {path: auth/token, max_leases: 10, inheritable: true}}
+    expect: {status: 400}
+  - id: lease-quota-invalid-role
+    request: {method: POST, path: /v1/sys/quotas/lease-count/compat-invalid, body: {path: secret, max_leases: 10, role: invalid}}
+    expect: {status: 400}
+  - id: lease-quota-create
+    request: {method: POST, path: /v1/sys/quotas/lease-count/compat-lease, body: {max_leases: 100000}}
+    expect: {status: 204}
+  - id: lease-quota-read
+    request: {method: GET, path: /v1/sys/quotas/lease-count/compat-lease}
+    expect:
+      status: 200
+      exact: {data.name: compat-lease, data.type: lease-count, data.path: "", data.role: "", data.max_leases: 100000}
+  - id: lease-quota-list
+    request: {method: LIST, path: /v1/sys/quotas/lease-count}
+    expect:
+      status: 200
+      body_schema: {type: object, required: [data], properties: {data: {type: object, required: [keys], properties: {keys: {type: array, items: {type: string}}}}}}
+  - id: lease-quota-update
+    request: {method: POST, path: /v1/sys/quotas/lease-count/compat-lease, body: {max_leases: 200000}}
+    expect: {status: 204}
+  - id: lease-quota-read-updated
+    request: {method: GET, path: /v1/sys/quotas/lease-count/compat-lease}
+    expect: {status: 200, exact: {data.max_leases: 200000}}
+  - id: lease-quota-delete
+    request: {method: DELETE, path: /v1/sys/quotas/lease-count/compat-lease}
+    expect: {status: 204}
+  - id: lease-quota-empty-list
+    request: {method: LIST, path: /v1/sys/quotas/lease-count}
+    expect: {status: 404}

@@ -951,6 +951,11 @@ func (m *ExpirationManager) StopNamespace(ns *namespace.Namespace) {
 	})
 
 	m.leaseCount -= len(leaseIds)
+	if m.core != nil && m.core.quotaManager != nil {
+		for id := range leaseIds {
+			m.core.quotaManager.ForgetLease(id)
+		}
+	}
 }
 
 // Revoke is used to revoke a secret named by the given LeaseID
@@ -1891,6 +1896,7 @@ func (m *ExpirationManager) deleteLockForLease(id string) {
 
 // updatePending is used to update a pending invocation for a lease
 func (m *ExpirationManager) updatePending(le *leaseEntry) {
+	m.trackQuotaLease(le)
 	if !m.useCache {
 		return
 	}
@@ -2140,7 +2146,7 @@ func (m *ExpirationManager) persistEntry(ctx context.Context, le *leaseEntry) er
 		ent.SealWrap = true
 	}
 
-	if err := m.leaseView(le.namespace).Put(ctx, &ent); err != nil {
+	if err := m.persistQuotaLease(ctx, le, &ent); err != nil {
 		return fmt.Errorf("failed to persist lease entry: %w", err)
 	}
 	return nil
@@ -2150,6 +2156,9 @@ func (m *ExpirationManager) persistEntry(ctx context.Context, le *leaseEntry) er
 func (m *ExpirationManager) deleteEntry(ctx context.Context, le *leaseEntry) error {
 	if err := m.leaseView(le.namespace).Delete(ctx, le.LeaseID); err != nil {
 		return fmt.Errorf("failed to delete lease entry: %w", err)
+	}
+	if m.core != nil && m.core.quotaManager != nil {
+		m.core.quotaManager.ForgetLease(le.LeaseID)
 	}
 	return nil
 }

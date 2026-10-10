@@ -29,6 +29,7 @@ const TypeRateLimit Type = "rate-limit"
 func quotaTypes() []string {
 	return []string{
 		TypeRateLimit.String(),
+		TypeLeaseCount.String(),
 	}
 }
 
@@ -77,6 +78,8 @@ func (q Type) String() string {
 	switch q {
 	case TypeRateLimit:
 		return "rate-limit"
+	case TypeLeaseCount:
+		return "lease-count"
 	}
 	return "unknown"
 }
@@ -151,6 +154,7 @@ func (a *access) QuotaID() string {
 // Manager holds all the existing quota rules. For any given input. the manager
 // checks them against any applicable quota rules.
 type Manager struct {
+	leaseRecords map[string]Request // protected by quotaLock
 	// db holds the in memory instances of all active quota rules indexed by
 	// some of the quota properties.
 	db      *memdb.MemDB
@@ -766,6 +770,7 @@ func (m *Manager) Reset() error {
 		return err
 	}
 	m.storage = nil
+	m.leaseRecords = nil
 
 	return nil
 }
@@ -1025,6 +1030,8 @@ func (m *Manager) LoadQuota(ctx context.Context, qType, name string) (Quota, err
 	switch qType {
 	case TypeRateLimit.String():
 		quota = &RateLimitQuota{}
+	case TypeLeaseCount.String():
+		quota = &LeaseCountQuota{}
 	default:
 		return nil, fmt.Errorf("unsupported type: %v", qType)
 	}
