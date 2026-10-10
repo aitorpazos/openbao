@@ -1,0 +1,29 @@
+api: identity-mfa-totp-generate
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/mfa/totp
+source_version: "v2.x (latest)"
+notes: >-
+  POST /identity/mfa/method/totp/generate takes required method_id (string, MFA
+  method UUID; no default). Generates a secret in the calling token's entity
+  only if it does not already exist. Sample success data contains barcode and
+  url strings. Positive enrollment deferred: needs real method UUID and an
+  entity-associated token; no login/enrollment scenarios in v1. This is Login
+  MFA, not named step-up, and is not individually marked Enterprise. Requested
+  feature grouping does not change that classification. Status 400 and errors
+  envelope are from https://developer.hashicorp.com/vault/api-docs for missing
+  required data; endpoint-specific missing-field status/error text unspecified.
+  Only malformed-input coverage, no actual secret generation. Page labels
+  v2.x (latest), not explicitly 2.1.x. No GET/LIST/DELETE documented.
+cases:
+  - id: missing-method-id
+    request:
+      method: POST
+      path: /v1/identity/mfa/method/totp/generate
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

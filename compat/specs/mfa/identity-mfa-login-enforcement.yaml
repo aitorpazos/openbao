@@ -1,0 +1,38 @@
+api: identity-mfa-login-enforcement
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/mfa/login-enforcement
+source_version: "v2.x (latest)"
+notes: >-
+  The documented route is /identity/mfa/login-enforcement/:name, NOT
+  /sys/mfa/login-enforcement/:name. Overview
+  https://developer.hashicorp.com/vault/api-docs/system/mfa and FAQ
+  https://developer.hashicorp.com/vault/docs/auth/login-mfa/faq distinguish Login
+  MFA from Enterprise step-up. This endpoint is not labeled Enterprise; feature
+  grouping is requested, not an edition assertion. POST creates/updates; GET
+  reads; DELETE deletes. Path name: required string. POST mfa_method_ids:
+  required array of UUID strings, ORed. auth_method_accessors, auth_method_types,
+  identity_group_ids, identity_entity_ids: arrays of strings, each defaults [];
+  at least one of these four selectors must be present. Group/entity IDs can be
+  from current or child namespace. Multiple enforcements must all be satisfied.
+  Successful create/update/read/delete deferred: no real Login MFA method UUID
+  fixture supplied, and v1 cannot capture one. Do not substitute a step-up method
+  name or the sample UUID. GET sample data has arrays of strings for all five
+  list parameters and string id, name, namespace_id. Collection LIST is covered
+  in a separate endpoint file. Required-field negative status/error envelope from
+  https://developer.hashicorp.com/vault/api-docs (400 missing data); the endpoint
+  does not give an exact error string or HTTP code. Both required constraints are
+  absent in this request; which validation error occurs first is unspecified.
+  Page labels version v2.x (latest), not explicitly 2.1.x.
+cases:
+  - id: missing-required-configuration
+    request:
+      method: POST
+      path: /v1/identity/mfa/login-enforcement/qa-login-enforcement
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

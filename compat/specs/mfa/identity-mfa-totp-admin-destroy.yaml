@@ -1,0 +1,29 @@
+api: identity-mfa-totp-admin-destroy
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/mfa/totp
+source_version: "v2.x (latest)"
+notes: >-
+  POST /identity/mfa/method/totp/admin-destroy requires method_id (string, MFA
+  method UUID) and entity_id (string, entity from which secret is removed).
+  No defaults documented. Deletes a TOTP secret; overwriting an entity secret
+  requires explicit deletion first, then generate or admin-generate. Positive
+  destruction deferred: real method/entity fixtures needed; no enrollment flow
+  in v1. No sample response or endpoint-specific HTTP code given. This Login MFA
+  endpoint is not individually marked Enterprise; feature grouping is requested,
+  not an Enterprise-only claim. Negative 400 and errors envelope derive from
+  https://developer.hashicorp.com/vault/api-docs (missing data); exact error text
+  and validation order unspecified. Page labels v2.x (latest), not explicitly
+  2.1.x. No GET/LIST/DELETE documented; destruction uses POST, not DELETE.
+cases:
+  - id: missing-required-ids
+    request:
+      method: POST
+      path: /v1/identity/mfa/method/totp/admin-destroy
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

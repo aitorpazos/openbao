@@ -1,0 +1,18 @@
+api: sys-health
+feature: core
+source: https://developer.hashicorp.com/vault/api-docs/system/health
+source_version: "current public API docs (retrieved 2026-10-10)"
+notes: Active, initialized, unsealed dev-server sanity check.
+cases:
+  - id: health-ok
+    request: {method: GET, path: /v1/sys/health}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [version, cluster_name, initialized, sealed]
+        properties:
+          version: {type: string}
+          cluster_name: {type: string}
+          initialized: {type: boolean, const: true}
+          sealed: {type: boolean, const: false}

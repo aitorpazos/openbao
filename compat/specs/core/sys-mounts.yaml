@@ -1,0 +1,17 @@
+api: sys-mounts
+feature: core
+source: https://developer.hashicorp.com/vault/api-docs/system/mounts
+source_version: "current public API docs (retrieved 2026-10-10)"
+notes: >
+  The documented List Mounted Secrets Engines operation uses HTTP GET, not
+  the HTTP LIST verb. A literal LIST returns 404 on the OpenBao dev server.
+cases:
+  - id: mounts-ok
+    request: {method: GET, path: /v1/sys/mounts}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data: {type: object}

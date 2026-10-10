@@ -1,0 +1,23 @@
+api: identity-mfa-login-enforcement-list
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/mfa/login-enforcement
+source_version: "v2.x (latest)"
+notes: >-
+  LIST /identity/mfa/login-enforcement lists enforcements visible in the current
+  or parent namespaces. No request body parameters documented. Sample response
+  has data.keys array of name strings. Login MFA, not an Enterprise-only step-up
+  API; grouping follows task request. See distinction in
+  https://developer.hashicorp.com/vault/docs/auth/login-mfa/faq . No documented
+  /sys/mfa/login-enforcement alias; do not invent one. HTTP status expectations
+  derive from https://developer.hashicorp.com/vault/api-docs : 200 success with
+  data; empty LIST is 404 with errors empty array. Status-only assertion because
+  v1 cannot express conditional body schemas; a 404 is also classified as
+  FEATURE_ABSENT by the documented harness, so empty lists may be misleading.
+  Docs label v2.x (latest), not explicitly 2.1.x.
+cases:
+  - id: list
+    request:
+      method: LIST
+      path: /v1/identity/mfa/login-enforcement
+    expect:
+      status: [200, 404]

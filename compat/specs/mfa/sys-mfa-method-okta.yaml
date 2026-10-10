@@ -1,0 +1,35 @@
+api: sys-mfa-method-okta
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/system/mfa/okta
+source_version: "v2.x (latest)"
+notes: >-
+  Enterprise named step-up method, root namespace only; edition source:
+  https://developer.hashicorp.com/vault/api-docs/system/mfa . POST, GET, DELETE
+  /sys/mfa/method/okta/:name documented; no LIST. Path name: required string.
+  POST mount_accessor: required string. username_format: optional string, blank
+  uses alias name; double-brace substitutions alias.name, entity.name,
+  alias.metadata.<key>, entity.metadata.<key>. org_name, api_token, base_url:
+  strings, not marked required, defaults unspecified. base_url examples are
+  okta.com, oktapreview.com, okta-emea.com. primary_email: boolean default false;
+  true matches only primary email. Successful POST/GET/DELETE chain deferred:
+  no real mount accessor or Okta fixture supplied; v1 lacks runtime substitution.
+  GET sample fields api_token, id, mount_accessor, name, org_name, type,
+  username_format are strings; production is boolean but not documented as a
+  request parameter. No response guarantee for base_url/primary_email supplied.
+  Negative status/error envelope based on required mount_accessor plus
+  https://developer.hashicorp.com/vault/api-docs (400 missing data); no exact
+  endpoint-specific status or error wording supplied. Page version label is
+  v2.x (latest), not an explicit 2.1.x claim.
+cases:
+  - id: missing-mount-accessor
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/okta/qa-okta-method
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

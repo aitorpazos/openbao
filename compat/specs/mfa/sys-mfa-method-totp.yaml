@@ -1,0 +1,118 @@
+api: sys-mfa-method-totp
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/system/mfa/totp
+source_version: "v2.x (latest)"
+notes: >-
+  Named Enterprise step-up MFA; root namespace required. Edition classification:
+  https://developer.hashicorp.com/vault/api-docs/system/mfa . Current page labels
+  itself v2.x (latest), not 2.1.x. Request path name is a required string.
+  POST issuer is a required string. Optional fields: period (integer or duration
+  string, default 30), key_size (integer, 20), qr_size (integer, 200), algorithm
+  (string, SHA1; SHA1/SHA256/SHA512), digits (integer, 6; 6/8), skew (integer, 1;
+  0/1), max_validation_attempts (integer, 5). No LIST operation is documented.
+  HTTP status expectations derive from https://developer.hashicorp.com/vault/api-docs
+  (200/204 success; 400 missing or invalid data); endpoint-specific success codes
+  and error strings are not given. Accept both success codes on writes, without
+  asserting an empty body because warnings may produce 200. The sample read JSON
+  lacks a comma after type; assert the documented fields, not that syntax error.
+  Repeated POST exercises configuration of the same name, not patch semantics.
+  Reserve qa-totp-method for this destructive create/configure/delete chain.
+  Enrollment endpoints on this same page are deferred, not guessed: GET
+  /sys/mfa/method/totp/:name/generate requires name (string) and stores a secret
+  in the calling token's entity if absent; POST
+  /sys/mfa/method/totp/:name/admin-generate requires name (string) and entity_id
+  (string). Both show data.barcode and data.url strings. No entity-token or entity
+  fixture is supplied, and these are enrollment operations outside config CRUD.
+  Admin-destroy is ambiguous: the table says POST
+  /sys/mfa/method/:name/admin-destroy but curl includes /totp/ before the name.
+  It requires name and entity_id strings, and explicitly deletes a secret before
+  regeneration. No executable admin-destroy path is selected from this conflict.
+  https://developer.hashicorp.com/vault/docs/enterprise/mfa states that admins
+  can generate/destroy credentials only for entities in the same namespace.
+  No separate zero-case YAML files are emitted for these deferred endpoints,
+  because the README requires one or more cases per spec.
+cases:
+  - id: missing-issuer
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/totp/qa-totp-missing-issuer
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: create
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/totp/qa-totp-method
+      body: {issuer: qa-vault}
+    expect:
+      status: [200, 204]
+  - id: read-defaults
+    depends: [create]
+    request:
+      method: GET
+      path: /v1/sys/mfa/method/totp/qa-totp-method
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [id]
+            properties:
+              id: {type: string}
+      exact:
+        data.name: qa-totp-method
+        data.type: totp
+        data.issuer: qa-vault
+        data.algorithm: SHA1
+        data.digits: 6
+        data.key_size: 20
+        data.period: 30
+        data.qr_size: 200
+        data.skew: 1
+        data.max_validation_attempts: 5
+  - id: configure-again
+    depends: [create]
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/totp/qa-totp-method
+      body:
+        issuer: qa-vault-updated
+        period: 60
+        key_size: 20
+        qr_size: 200
+        algorithm: SHA256
+        digits: 8
+        skew: 0
+        max_validation_attempts: 5
+    expect:
+      status: [200, 204]
+  - id: read-configured
+    depends: [create, configure-again]
+    request:
+      method: GET
+      path: /v1/sys/mfa/method/totp/qa-totp-method
+    expect:
+      status: 200
+      exact:
+        data.name: qa-totp-method
+        data.type: totp
+        data.issuer: qa-vault-updated
+        data.period: 60
+        data.algorithm: SHA256
+        data.digits: 8
+        data.skew: 0
+  - id: delete
+    depends: [create]
+    request:
+      method: DELETE
+      path: /v1/sys/mfa/method/totp/qa-totp-method
+    expect:
+      status: [200, 204]

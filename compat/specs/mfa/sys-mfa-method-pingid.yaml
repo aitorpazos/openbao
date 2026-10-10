@@ -1,0 +1,34 @@
+api: sys-mfa-method-pingid
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/system/mfa/pingid
+source_version: "v2.x (latest)"
+notes: >-
+  Enterprise named step-up method, root namespace only; edition source:
+  https://developer.hashicorp.com/vault/api-docs/system/mfa . POST, GET, DELETE
+  /sys/mfa/method/pingid/:name documented; no LIST. Path name: required string.
+  POST mount_accessor: required string. username_format: optional string, blank
+  uses alias name; double-brace substitutions alias.name, entity.name,
+  alias.metadata.<key>, entity.metadata.<key>. settings_file_base64: string,
+  a base64-encoded third-party settings file retrieved from PingID configuration;
+  not marked required, no default specified. Successful POST/GET/DELETE chain
+  deferred: no real mount accessor or PingID settings fixture supplied. The
+  truncated sample AA8owj3... is not a usable settings file. GET sample data:
+  use_signature (boolean); idp_url, admin_url, authenticator_url, mount_accessor,
+  name, org_alias, type, username_format (strings). These response fields are not
+  documented as POST parameters. Negative status/error envelope based on required
+  mount_accessor plus https://developer.hashicorp.com/vault/api-docs (400 missing
+  data); no exact endpoint-specific error wording or status supplied. Page labels
+  itself v2.x (latest), not explicitly 2.1.x.
+cases:
+  - id: missing-mount-accessor
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/pingid/qa-pingid-method
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

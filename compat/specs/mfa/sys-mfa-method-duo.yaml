@@ -1,0 +1,35 @@
+api: sys-mfa-method-duo
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/system/mfa/duo
+source_version: "v2.x (latest)"
+notes: >-
+  Enterprise named step-up method, root namespace only; edition source:
+  https://developer.hashicorp.com/vault/api-docs/system/mfa . POST, GET, DELETE
+  /sys/mfa/method/duo/:name documented; no LIST. Path name: required string.
+  POST mount_accessor: required string, ties automatic alias mapping to a mount.
+  username_format: optional string, blank uses alias name; supported substitutions
+  alias.name, entity.name, alias.metadata.<key>, entity.metadata.<key> in double
+  braces. secret_key, integration_key, api_hostname, push_info: strings, not marked
+  required and no defaults specified. Successful POST/GET/DELETE chain deferred:
+  no real mount accessor or Duo fixture was supplied, and v1 cannot discover and
+  substitute one. Do not send the documentation's sample credentials as fixtures.
+  GET sample data fields: api_hostname, id, integration_key, mount_accessor, name,
+  pushinfo, secret_key, type, username_format (strings). Sample uses pushinfo while
+  request uses push_info and swaps key values relative to request; do not assert
+  those ambiguous mappings. Negative status/error envelope based on required
+  mount_accessor plus https://developer.hashicorp.com/vault/api-docs (400 missing
+  data); no exact endpoint-specific status/error wording supplied. Version label
+  is v2.x (latest), not an explicit 2.1.x claim.
+cases:
+  - id: missing-mount-accessor
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/duo/qa-duo-method
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

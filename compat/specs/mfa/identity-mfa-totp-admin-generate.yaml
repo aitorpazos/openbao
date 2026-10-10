@@ -1,0 +1,29 @@
+api: identity-mfa-totp-admin-generate
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/mfa/totp
+source_version: "v2.x (latest)"
+notes: >-
+  POST /identity/mfa/method/totp/admin-generate requires method_id (string, MFA
+  method UUID) and entity_id (string, target entity ID); no defaults specified.
+  Stores generated secret on the given entity, not the calling token's entity.
+  Sample success data contains barcode and url strings. Positive generation
+  deferred: real method and entity IDs needed; no enrollment scenarios in v1.
+  This Login MFA endpoint is not individually marked Enterprise. Requested
+  feature grouping does not imply Enterprise-only availability. Status 400 and
+  errors envelope derive from https://developer.hashicorp.com/vault/api-docs
+  (missing data); endpoint-specific status/error text and validation order are
+  unspecified. No success assertion using documentation sample UUIDs. Page labels
+  v2.x (latest), not explicitly 2.1.x. No GET/LIST/DELETE documented.
+cases:
+  - id: missing-required-ids
+    request:
+      method: POST
+      path: /v1/identity/mfa/method/totp/admin-generate
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

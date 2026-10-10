@@ -1,0 +1,23 @@
+api: sys-leader
+feature: core
+source: https://developer.hashicorp.com/vault/api-docs/system/leader
+source_version: "current public API docs (retrieved 2026-10-10)"
+notes: >
+  The docs show an HA-enabled sample with is_self=false, not a universal
+  invariant. This sanity spec requires the documented HA status and validates
+  the documented leader fields when present. OpenBao's non-HA in-memory dev
+  server returns only {"ha_enabled":false}; it omits is_self rather than
+  returning false. An HA-specific conformance case requires an HA target.
+cases:
+  - id: leader-ok
+    request: {method: GET, path: /v1/sys/leader}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [ha_enabled]
+        properties:
+          ha_enabled: {type: boolean}
+          is_self: {type: boolean}
+          leader_address: {type: string}
+          leader_cluster_address: {type: string}

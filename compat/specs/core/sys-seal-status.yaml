@@ -1,0 +1,17 @@
+api: sys-seal-status
+feature: core
+source: https://developer.hashicorp.com/vault/api-docs/system/seal-status
+source_version: "current public API docs (retrieved 2026-10-10)"
+notes: Dev mode starts initialized and unsealed; matches the documented unsealed response.
+cases:
+  - id: seal-status-ok
+    request: {method: GET, path: /v1/sys/seal-status}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [sealed, initialized, version]
+        properties:
+          sealed: {type: boolean, const: false}
+          initialized: {type: boolean, const: true}
+          version: {type: string}

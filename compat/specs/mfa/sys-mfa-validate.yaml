@@ -1,0 +1,38 @@
+api: sys-mfa-validate
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/system/mfa/validate
+source_version: "v2.x (latest)"
+notes: >-
+  POST /sys/mfa/validate is Login MFA, not the Enterprise step-up single-phase
+  flow. See https://developer.hashicorp.com/vault/docs/auth/login-mfa/faq and
+  https://developer.hashicorp.com/vault/docs/enterprise/mfa . Step-up uses named
+  methods in policies and X-Vault-MFA; Login MFA two-phase flow returns an MFA
+  requirement then accepts validation. Required mfa_request_id is a string from
+  that login response (NOT a documented mfa_requirement_id parameter).
+  Required mfa_payload is documented as map<string|[]string>; prose and examples
+  use UUID keys and string-array passcodes. Since 1.13.0 method-name keys are also
+  supported, and passcode= is optional for all methods. Methods without passcodes
+  use empty-string passcodes. Defaults are not specified. Failed MFA validation
+  returns 403; success returns the successful login response including token and
+  accessor. No login/validate scenario or failed-passcode case is authored: it
+  requires a fresh request ID, method, and credentials, beyond v1 config scope.
+  The only case checks absent required request data, not failed MFA validation;
+  400 and errors envelope derive from https://developer.hashicorp.com/vault/api-docs .
+  Endpoint-specific missing-field code/message is not stated; do not extrapolate
+  the documented 403 failed-validation code to absent request parameters.
+  No GET/LIST/DELETE documented. Not marked Enterprise on this API page;
+  requested feature grouping must not be read as an Enterprise-only assertion.
+  Page claims v2.x (latest), not specifically 2.1.x.
+cases:
+  - id: missing-required-input
+    request:
+      method: POST
+      path: /v1/sys/mfa/validate
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

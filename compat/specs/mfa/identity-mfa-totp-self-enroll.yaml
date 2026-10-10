@@ -1,0 +1,32 @@
+api: identity-mfa-totp-self-enroll
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/mfa/totp
+source_version: "v2.x (latest)"
+notes: >-
+  POST /identity/mfa/method/totp/self-enroll is explicitly Enterprise. Required
+  mfa_request_id (string, MFA requirement identifier from authentication response
+  of a login request) and mfa_method_id (string, method UUID); no defaults given.
+  Unlike generate, this parameter is mfa_method_id, not method_id. Enables users
+  without a TOTP secret to generate one during login. Requires method parameter
+  enable_self_enrollment=true (boolean, default false, explicitly Enterprise).
+  Sample success data contains barcode and url strings. Positive enrollment
+  deferred to v2: requires a live pending login, configured method and identity;
+  this file tests only missing input, not a login flow. Negative 400 and errors
+  envelope derive from https://developer.hashicorp.com/vault/api-docs (missing
+  data); endpoint-specific missing-field code, error text and validation order
+  not specified. This is the Enterprise self-enrollment extension of Login MFA,
+  not the named sys/mfa method API. Page labels v2.x (latest), not explicitly
+  2.1.x. No GET/LIST/DELETE documented.
+cases:
+  - id: missing-required-ids
+    request:
+      method: POST
+      path: /v1/identity/mfa/method/totp/self-enroll
+      body: {}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

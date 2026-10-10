@@ -1,0 +1,52 @@
+api: identity-mfa-method-totp
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/mfa/totp
+source_version: "v2.x (latest)"
+notes: >-
+  Login MFA, not named Enterprise step-up MFA. Retains requested feature grouping;
+  passing this file does not demonstrate Enterprise step-up support. Distinction:
+  https://developer.hashicorp.com/vault/api-docs/system/mfa and
+  https://developer.hashicorp.com/vault/docs/auth/login-mfa/faq . POST creates at
+  /identity/mfa/method/totp; LIST at same path lists methods visible in current or
+  parent namespaces. Request method_name (string, optional, unique name, supported
+  from 1.13.0); issuer (string, required); period (integer or duration string,
+  default 30); key_size (integer, 20); qr_size (integer, 200); algorithm (string,
+  SHA1; allowed SHA1/SHA256/SHA512); digits (integer, 6; allowed 6/8); skew
+  (integer, 1; allowed 0/1); max_validation_attempts (integer, 5);
+  enable_self_enrollment (boolean, false, explicitly Enterprise). Other operations
+  on this page are not individually marked Enterprise except self-enroll.
+  POST update, GET read, DELETE at /identity/mfa/method/totp/:method_id require a
+  method UUID string. Update accepts all create parameters. Delete allowed only
+  when not used by login enforcement. Successful create/update/read/delete is
+  deferred because the generated UUID cannot be captured by v1 and creating
+  without cleanup would leave a method. method_name is not documented as a UUID
+  substitute in those paths. Read sample data fields: algorithm/string,
+  digits/integer, id/string, issuer/string, key_size/integer, period/integer,
+  qr_size/integer, skew/integer, type/string, namespace/string. No sample create
+  response or endpoint-specific HTTP codes given. Status expectations from
+  https://developer.hashicorp.com/vault/api-docs : missing data 400; nonempty
+  LIST success 200; empty LIST 404 with errors empty array. The harness may label
+  an empty-list 404 FEATURE_ABSENT rather than distinguish it from absent support.
+  LIST is deliberately
+  status-only since v1 cannot conditionally assert both response shapes. Successful
+  LIST sample has data.keys array of UUID strings. No exact error text asserted.
+  Docs identify version only as v2.x (latest), not explicitly 2.1.x.
+cases:
+  - id: missing-issuer
+    request:
+      method: POST
+      path: /v1/identity/mfa/method/totp
+      body: {method_name: qa-login-totp-method}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: list
+    request:
+      method: LIST
+      path: /v1/identity/mfa/method/totp
+    expect:
+      status: [200, 404]
