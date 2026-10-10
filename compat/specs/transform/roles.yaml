@@ -1,0 +1,53 @@
+api: transform_roles
+feature: transform
+source: https://developer.hashicorp.com/vault/api-docs/secret/transform
+source_version: "v2.x (latest)"
+notes: >
+  Source sections Create/Update role, Read role, List roles and Delete role.
+  The only documented body field is transformations, default []; name is a
+  URL parameter. An empty body is therefore NOT a missing-required-field
+  negative. templates, max_ttl, ttl, deletion_allowed, lowercase, uppercase,
+  prefix and suffix are not documented role parameters. No speculative
+  rejection tests for them are included. Referencing transformations before
+  their creation follows the Setup example at
+  https://developer.hashicorp.com/vault/docs/secrets/transform#setup
+  (v2.x (latest)); these reference-only names are never created or used for
+  encode/decode. HTTP status semantics:
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  (v2.x (latest)). Filtered LIST makes the exact singleton assertion safe in
+  a shared mount. No live verification; authorization/ACL negatives deferred.
+cases:
+  - id: role-create
+    request:
+      method: POST
+      path: /v1/transform/role/compat-tf-role-crud
+      body: {transformations: [compat-tf-reference-a]}
+    expect: {status: [200, 204]}
+  - id: role-read
+    depends: [role-create]
+    request: {method: GET, path: /v1/transform/role/compat-tf-role-crud}
+    expect:
+      status: 200
+      exact: {data.transformations: [compat-tf-reference-a]}
+  - id: role-update
+    depends: [role-create]
+    request:
+      method: POST
+      path: /v1/transform/role/compat-tf-role-crud
+      body: {transformations: [compat-tf-reference-b]}
+    expect: {status: [200, 204]}
+  - id: role-read-updated
+    depends: [role-create, role-update]
+    request: {method: GET, path: /v1/transform/role/compat-tf-role-crud}
+    expect:
+      status: 200
+      exact: {data.transformations: [compat-tf-reference-b]}
+  - id: roles-list-filtered
+    depends: [role-create]
+    request: {method: LIST, path: '/v1/transform/role?filter=compat-tf-role-crud'}
+    expect:
+      status: 200
+      exact: {data.keys: [compat-tf-role-crud]}
+  - id: role-cleanup
+    request: {method: DELETE, path: /v1/transform/role/compat-tf-role-crud}
+    expect: {status: [200, 204]}

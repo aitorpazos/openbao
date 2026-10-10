@@ -1,0 +1,41 @@
+api: transform_tokenization_stores
+feature: transform
+source: https://developer.hashicorp.com/vault/api-docs/secret/transform
+source_version: "v2.x (latest)"
+notes: >
+  Source sections Create/Update tokenization store and Delete store. Required
+  type, driver, connection_string, username and password are documented.
+  These progressively incomplete requests stop before any connection string
+  or credentials are supplied, so they need no external database and cannot
+  deliberately initiate a database connection. They assert missing-data
+  rejection, not which omitted field is validated first. Status semantics:
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  (v2.x (latest)). External SQL store create/read/update/list round trips and
+  schema initialization are deferred until an explicit PostgreSQL, MySQL or
+  MSSQL fixture is available. The self-contained builtin/internal store is
+  exercised by tokenization.yaml instead. The list table documents /stores,
+  while its sample curl says /store; do not infer a second route from that
+  discrepancy. No live validation was performed. Final unconditional delete
+  cleans up the reserved name if an invalid write unexpectedly succeeds.
+cases:
+  - id: store-missing-required-fields
+    request:
+      method: POST
+      path: /v1/transform/stores/compat-tf-invalid-store
+      body: {}
+    expect: {status: 400}
+  - id: store-missing-driver-and-connection
+    request:
+      method: POST
+      path: /v1/transform/stores/compat-tf-invalid-store
+      body: {type: sql}
+    expect: {status: 400}
+  - id: store-missing-connection-and-credentials
+    request:
+      method: POST
+      path: /v1/transform/stores/compat-tf-invalid-store
+      body: {type: sql, driver: postgres}
+    expect: {status: 400}
+  - id: store-cleanup
+    request: {method: DELETE, path: /v1/transform/stores/compat-tf-invalid-store}
+    expect: {status: [200, 204]}

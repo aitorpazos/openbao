@@ -1,0 +1,92 @@
+api: transform_templates
+feature: transform
+source: https://developer.hashicorp.com/vault/api-docs/secret/transform
+source_version: "v2.x (latest)"
+notes: >
+  Source sections Create/Update template, Read template, List template and
+  Delete template document type=regex, pattern (singular), alphabet,
+  encode_format and decode_formats. There is no documented patterns field.
+  Required-field negatives apply on creation; run in file order with the
+  reserved compat-tf-template-crud name initially absent. The successful
+  upsert and unconditional final cleanup reuse that name even if a negative
+  unexpectedly creates it. Builtin numeric requires no external fixture.
+  Status expectations derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  (v2.x (latest)); exact error wording is unspecified and not asserted.
+  No live verification: required type/pattern enforcement versus any runtime
+  defaults is explicitly unverified. FPE decode-format execution and batch
+  round trips are deferred because the v1 harness cannot capture ciphertext.
+cases:
+  - id: template-missing-type
+    request:
+      method: POST
+      path: /v1/transform/template/compat-tf-template-crud
+      body: {pattern: '([0-9]{9})', alphabet: builtin/numeric}
+    expect: {status: 400}
+  - id: template-missing-pattern
+    request:
+      method: POST
+      path: /v1/transform/template/compat-tf-template-crud
+      body: {type: regex, alphabet: builtin/numeric}
+    expect: {status: 400}
+  - id: template-create
+    request:
+      method: POST
+      path: /v1/transform/template/compat-tf-template-crud
+      body:
+        type: regex
+        pattern: '(\d{3})[-/](\d{2})[-/](\d{4})'
+        alphabet: builtin/numeric
+        encode_format: '$1-$2-$3'
+        decode_formats: {first-three: '$1', last-four: '$3'}
+    expect: {status: [200, 204]}
+  - id: template-read
+    depends: [template-create]
+    request: {method: GET, path: /v1/transform/template/compat-tf-template-crud}
+    expect:
+      status: 200
+      exact:
+        data.type: regex
+        data.pattern: '(\d{3})[-/](\d{2})[-/](\d{4})'
+        data.alphabet: builtin/numeric
+        data.encode_format: '$1-$2-$3'
+        data.decode_formats: {first-three: '$1', last-four: '$3'}
+  - id: template-update
+    depends: [template-create]
+    request:
+      method: POST
+      path: /v1/transform/template/compat-tf-template-crud
+      body:
+        type: regex
+        pattern: '(\d{3})[-/](\d{2})[-/](\d{4})'
+        alphabet: builtin/numeric
+        encode_format: '$1/$2/$3'
+        decode_formats: {first-three: '$1', last-four: '$3'}
+    expect: {status: [200, 204]}
+  - id: template-read-updated
+    depends: [template-create, template-update]
+    request: {method: GET, path: /v1/transform/template/compat-tf-template-crud}
+    expect:
+      status: 200
+      exact:
+        data.type: regex
+        data.alphabet: builtin/numeric
+        data.encode_format: '$1/$2/$3'
+        data.decode_formats.last-four: '$3'
+  - id: templates-list
+    depends: [template-create]
+    request: {method: LIST, path: /v1/transform/template}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys]
+            properties:
+              keys: {type: array, items: {type: string}}
+  - id: template-cleanup
+    request: {method: DELETE, path: /v1/transform/template/compat-tf-template-crud}
+    expect: {status: [200, 204]}

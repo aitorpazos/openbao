@@ -1,0 +1,58 @@
+api: transform_alphabets
+feature: transform
+source: https://developer.hashicorp.com/vault/api-docs/secret/transform
+source_version: "v2.x (latest)"
+notes: >
+  Read alphabet and List alphabets define the routes and response shapes.
+  Builtin names are documented at
+  https://developer.hashicorp.com/vault/docs/secrets/transform#alphabets
+  (v2.x (latest)). Each builtin is read individually to assert its presence:
+  the harness has no array-contains assertion, and LIST may expose hierarchy
+  prefixes rather than flattened builtin names. Alphabet contents/order are
+  not specified there, so only string type is checked. Custom alphabet CRUD
+  is documented (alphabets are not globally read-only) but deferred here.
+  No builtin is modified. Requires an existing transform/ mount. HTTP status
+  semantics: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  (v2.x (latest)). No live dev-server verification was performed.
+cases:
+  - id: alphabets-list
+    request: {method: LIST, path: /v1/transform/alphabet}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys]
+            properties:
+              keys: {type: array, items: {type: string}}
+  - id: alphabet-builtin-numeric
+    request: {method: GET, path: /v1/transform/alphabet/builtin/numeric}
+    expect:
+      status: 200
+      body_schema: &alphabet_response
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [alphabet]
+            properties:
+              alphabet: {type: string}
+  - id: alphabet-builtin-alphalower
+    request: {method: GET, path: /v1/transform/alphabet/builtin/alphalower}
+    expect: {status: 200, body_schema: *alphabet_response}
+  - id: alphabet-builtin-alphaupper
+    request: {method: GET, path: /v1/transform/alphabet/builtin/alphaupper}
+    expect: {status: 200, body_schema: *alphabet_response}
+  - id: alphabet-builtin-alphanumericlower
+    request: {method: GET, path: /v1/transform/alphabet/builtin/alphanumericlower}
+    expect: {status: 200, body_schema: *alphabet_response}
+  - id: alphabet-builtin-alphanumericupper
+    request: {method: GET, path: /v1/transform/alphabet/builtin/alphanumericupper}
+    expect: {status: 200, body_schema: *alphabet_response}
+  - id: alphabet-builtin-alphanumeric
+    request: {method: GET, path: /v1/transform/alphabet/builtin/alphanumeric}
+    expect: {status: 200, body_schema: *alphabet_response}

@@ -1,0 +1,123 @@
+api: transform_tokenization
+feature: transform
+source: https://developer.hashicorp.com/vault/api-docs/secret/transform
+source_version: "v2.x (latest)"
+notes: >
+  Source sections Create/Update tokenization transformation, Read/List/Delete
+  transformation, Create/Update role, Encode, Decode, Validate token and
+  Retrieve token metadata. Tokenization configuration is a transformation,
+  not a separate tokenization role or source resource. Uses the documented
+  builtin/internal store; no SQL/KMS fixture is needed. max_ttl belongs on
+  the transformation; ttl/expiration belong on encode. No required body
+  field exists for ordinary tokenization creation, so an empty-body 400 is
+  deliberately NOT asserted there. Response assertions use documented
+  common transformation fields rather than inventing a tokenization read
+  sample or TTL serialization. The update changes allowed_roles, then
+  verifies it through the generic read endpoint. Status conventions:
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  (v2.x (latest)). Statefulness/positive-path deferrals:
+  https://developer.hashicorp.com/vault/docs/secrets/transform/tokenization
+  (v2.x (latest)). Encode/decode negatives have a real authorized fixture.
+  Positive token flows, TTL expiry, batches, snapshot/restore, key lifecycle
+  and lookup are deferred; the v1 harness cannot reuse generated tokens.
+  No live verification; no exact error wording is assumed. Role cleanup
+  precedes transformation cleanup, both unconditional. SQL store validation
+  is covered separately. The metadata table route is used, not its erroneous
+  sample curl route ending in encode/example-role.
+cases:
+  - id: tokenization-create
+    request:
+      method: POST
+      path: /v1/transform/transformations/tokenization/compat-tf-tokenization
+      body:
+        mapping_mode: default
+        convergent: false
+        max_ttl: 1h
+        stores: [builtin/internal]
+        allowed_roles: [compat-tf-token-role-before]
+        deletion_allowed: true
+    expect: {status: [200, 204]}
+  - id: tokenization-read
+    depends: [tokenization-create]
+    request: {method: GET, path: /v1/transform/transformation/compat-tf-tokenization}
+    expect:
+      status: 200
+      exact:
+        data.type: tokenization
+        data.allowed_roles: [compat-tf-token-role-before]
+  - id: tokenization-update
+    depends: [tokenization-create]
+    request:
+      method: POST
+      path: /v1/transform/transformations/tokenization/compat-tf-tokenization
+      body:
+        mapping_mode: default
+        convergent: false
+        max_ttl: 2h
+        stores: [builtin/internal]
+        allowed_roles: [compat-tf-token-role]
+        deletion_allowed: true
+    expect: {status: [200, 204]}
+  - id: tokenization-read-updated
+    depends: [tokenization-create, tokenization-update]
+    request: {method: GET, path: /v1/transform/transformation/compat-tf-tokenization}
+    expect:
+      status: 200
+      exact:
+        data.type: tokenization
+        data.allowed_roles: [compat-tf-token-role]
+  - id: transformations-list
+    depends: [tokenization-create]
+    request: {method: LIST, path: /v1/transform/transformation}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys]
+            properties:
+              keys: {type: array, items: {type: string}}
+  - id: tokenization-role-create
+    depends: [tokenization-create, tokenization-update]
+    request:
+      method: POST
+      path: /v1/transform/role/compat-tf-token-role
+      body: {transformations: [compat-tf-tokenization]}
+    expect: {status: [200, 204]}
+  - id: tokenization-encode-missing-value
+    depends: [tokenization-create, tokenization-update, tokenization-role-create]
+    request:
+      method: POST
+      path: /v1/transform/encode/compat-tf-token-role
+      body: {transformation: compat-tf-tokenization}
+    expect: {status: 400}
+  - id: tokenization-decode-missing-value
+    depends: [tokenization-create, tokenization-update, tokenization-role-create]
+    request:
+      method: POST
+      path: /v1/transform/decode/compat-tf-token-role
+      body: {transformation: compat-tf-tokenization}
+    expect: {status: 400}
+  - id: tokenization-validate-missing-value
+    depends: [tokenization-create, tokenization-update, tokenization-role-create]
+    request:
+      method: POST
+      path: /v1/transform/validate/compat-tf-token-role
+      body: {transformation: compat-tf-tokenization}
+    expect: {status: 400}
+  - id: tokenization-metadata-missing-value
+    depends: [tokenization-create, tokenization-update, tokenization-role-create]
+    request:
+      method: POST
+      path: /v1/transform/metadata/compat-tf-token-role
+      body: {transformation: compat-tf-tokenization}
+    expect: {status: 400}
+  - id: tokenization-role-cleanup
+    request: {method: DELETE, path: /v1/transform/role/compat-tf-token-role}
+    expect: {status: [200, 204]}
+  - id: tokenization-transformation-cleanup
+    request: {method: DELETE, path: /v1/transform/transformation/compat-tf-tokenization}
+    expect: {status: [200, 204]}

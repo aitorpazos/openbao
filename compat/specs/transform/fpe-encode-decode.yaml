@@ -1,0 +1,85 @@
+api: transform_fpe_encode_decode
+feature: transform
+source: https://developer.hashicorp.com/vault/api-docs/secret/transform
+source_version: "v2.x (latest)"
+notes: >
+  Source sections Create/Update FPE transformation, Create/Update role,
+  Encode, Decode, Delete role and Delete transformation. There are no
+  separate fpe-encode/fpe-decode routes: both operations are role-based.
+  template is required for FPE creation. An actual internal-tweak FPE
+  transformation and authorized role isolate missing-value errors from
+  missing-role or disallowed-transformation errors. Builtin template
+  availability and cleanup ordering are documented at
+  https://developer.hashicorp.com/vault/docs/secrets/transform
+  (v2.x (latest)), Provided builtin resources and Deletion behavior.
+  This fixture needs neither a custom alphabet nor an external service.
+  HTTP status conventions come from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  (v2.x (latest)); endpoint-specific error messages are not specified.
+  The encode smoke test checks only shape, never the example ciphertext.
+  A real encode-then-decode round trip, generated/supplied tweak scenarios,
+  decode formats and batches are deferred: the v1 harness cannot capture
+  and substitute server-generated ciphertext/tweaks. No server was contacted.
+  Final cleanup is unconditional, role before transformation; the latter
+  is created with deletion_allowed=true. No builtin is deleted.
+cases:
+  - id: fpe-create-missing-template
+    request:
+      method: POST
+      path: /v1/transform/transformations/fpe/compat-tf-fpe
+      body: {tweak_source: internal, deletion_allowed: true}
+    expect: {status: 400}
+  - id: fpe-create
+    request:
+      method: POST
+      path: /v1/transform/transformations/fpe/compat-tf-fpe
+      body:
+        template: builtin/creditcardnumber
+        tweak_source: internal
+        allowed_roles: [compat-tf-fpe-role]
+        deletion_allowed: true
+    expect: {status: [200, 204]}
+  - id: fpe-role-create
+    depends: [fpe-create]
+    request:
+      method: POST
+      path: /v1/transform/role/compat-tf-fpe-role
+      body: {transformations: [compat-tf-fpe]}
+    expect: {status: [200, 204]}
+  - id: fpe-encode-missing-value
+    depends: [fpe-create, fpe-role-create]
+    request:
+      method: POST
+      path: /v1/transform/encode/compat-tf-fpe-role
+      body: {transformation: compat-tf-fpe}
+    expect: {status: 400}
+  - id: fpe-decode-missing-value
+    depends: [fpe-create, fpe-role-create]
+    request:
+      method: POST
+      path: /v1/transform/decode/compat-tf-fpe-role
+      body: {transformation: compat-tf-fpe}
+    expect: {status: 400}
+  - id: fpe-encode-smoke
+    depends: [fpe-create, fpe-role-create]
+    request:
+      method: POST
+      path: /v1/transform/encode/compat-tf-fpe-role
+      body: {value: '1111-2222-3333-4444'}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [encoded_value]
+            properties:
+              encoded_value: {type: string, pattern: '^[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{4}$'}
+  - id: fpe-role-cleanup
+    request: {method: DELETE, path: /v1/transform/role/compat-tf-fpe-role}
+    expect: {status: [200, 204]}
+  - id: fpe-transformation-cleanup
+    request: {method: DELETE, path: /v1/transform/transformation/compat-tf-fpe}
+    expect: {status: [200, 204]}
