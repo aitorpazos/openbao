@@ -4030,6 +4030,16 @@ func (c *Core) performPolicyChecks(ctx context.Context, acl *policy.ACL, te *log
 		if !ret.RootPrivs && opts.RootPrivsRequired && req.Operation != logical.HelpOperation {
 			return ret
 		}
+		// Step-up MFA: ACL rules may require named MFA methods (policy mfa_methods).
+		// Credentials arrive in X-Vault-MFA headers; validation happens inline
+		// (single-phase flow). Empty requirement costs one length check.
+		if len(ret.ACLResults.MFAMethods) != 0 {
+			if err := c.validateNamedMFA(ctx, req, te, ret.ACLResults.MFAMethods); err != nil {
+				ret.Error = err
+				ret.DeniedError = true
+				return ret
+			}
+		}
 	}
 
 	ret.Allowed = true

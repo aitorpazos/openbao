@@ -20,10 +20,19 @@ NOT an additive new package is recorded here. Additive new packages
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
 | `internal/vault/logical_system.go` | +1 path registration line in `NewSystemBackend`; +1 field (`namedMFAMethodLock`) on `SystemBackend` | Registers step-up MFA named-method paths; per-backend mutex for atomic config writes | — |
+| `internal/vault/core.go` | +9 lines in `Core.performPolicyChecks` (after root-privs check): one length check + `validateNamedMFA` call when ACL results carry `mfa_methods` | Step-up enforcement hook; zero added work when no rule requires MFA | — |
 
 ### Step-up MFA (compat-harness branch)
 
+Policy parser already carried `mfa_methods` in OpenBao upstream (no parser diff).
 New packages/files (additive, port free): `internal/vault/logical_system_mfa_methods.go`
 (+ test) implement `sys/mfa/method/{totp,duo,okta,pingid}/<name>` config CRUD,
 root-namespace-only, stable method IDs, documented defaults (TOTP: SHA1/6/20/30/200/1/5).
-Acceptance: `compat/specs/mfa/sys-mfa-method-*.yaml` PASS on live build.
+`internal/vault/logical_system_mfa_totp.go` (+ test): per-entity TOTP enrollment
+(self `GET .../generate`, admin `POST .../admin-generate`, admin-destroy).
+`internal/vault/policy_mfa.go` (+ test): `validateNamedMFA` — X-Vault-MFA header
+parsing (`name[:key[=value]]`), AND semantics, TOTP validation (algorithm/digits/
+period/skew/max_validation_attempts, replay rejection), named errors.
+Acceptance: `compat/specs/mfa/*` + live e2e (403 missing/invalid, 200 valid code,
+403 replay). Documented deviation: step-up failure = 403 errors[] (challenge shape
+undocumented in public docs).
