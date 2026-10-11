@@ -19,6 +19,8 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/builtin/logical/transit/path_sign_verify.go` | Add signature_context field and per-item forwarding; dispatch sign/verify through Ed25519 variant helpers | RFC 8032 Ed25519ctx/ph with base64 context validation, keeping derivation context separate | — |
+| `internal/builtin/logical/transit/ed25519_variants.go`, `internal/builtin/logical/transit/ed25519_variants_test.go` (new) | Standard-library Ed25519ctx/ph signing and verification, policy version/deletion restrictions, derived keys, known-signature and batch tests | Landed transit conformance spec's Ed25519 variants only; CMAC/CBC and additional PQC API key types are not implemented by this patch | — |
 | `internal/vault/core.go` | +3 registration lines: SAML/SCEP credential factories; OS logical factory with `vault-plugin-secrets-os` alias | Configuration-only auth methods and offline OS account storage, clean-room public docs | — |
 | `internal/builtin/logical/pki/backend.go` | +1 path registration: `pathConfigSCEP()` | Disabled PKI SCEP configuration round trips; protocol enrollment explicitly unavailable | — |
 | `internal/vault/logical_auth_os_test.go` (new) | SAML config/role validation and CRUD, SCEP role and PKI config round trips, OS host/account lifecycle and credential retention/reset/restore | Unit coverage for the clean-room auth/OS configuration subset, including fail-closed remote-operation requests | — |
@@ -74,6 +76,12 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/http/util.go` | +1 path in `isSnapshotRequest`: `/v1/sys/storage/raft/snapshot-load` | Skip request-body buffering for binary snapshot uploads | — |
 | `compat/harness/spec.go` | +`BodyRaw` field (base64) on `Request` | Binary (non-JSON) request bodies for upload cases; cannot survive YAML/JSON round trips | — |
 | `compat/harness/main.go` | +`body_raw` handling: base64 decode, `Content-Type: application/octet-stream` | Same as above (harness execution) | — |
+| `internal/builtin/logical/transit/path_cmac.go` (new), `sdk/helper/keysutil/aes_compat.go` (new) | CMAC (NIST SP 800-38B) and CBC+PKCS#7 (SP 800-38A) key types with encrypt/decrypt paths following the existing AES code paths | Vault-documented transit key types per landed spec | — |
+| `sdk/helper/keysutil/policy.go`, `internal/builtin/logical/transit/path_keys.go`, `path_export.go`, `backend.go` | Vault-documented key-type spellings (`ml-dsa` + `parameter_set`, `hybrid` + algorithm fields) mapped into the existing keysutil model; existing spellings kept working | Conformance with Vault's documented transit API; KEY_TYPE_COMPATIBILITY.md documents the mapping | — |
+| `internal/builtin/logical/pki/path_issuance_config.go` (new) | EST/CMP config paths, external-policy config, SCEP log-level config on the PKI backend | Vault-documented issuance-protocol configuration surface | — |
+| `internal/builtin/logical/pki/path_export_keys.go` (new) | Export-key management paths (generate/list/get/delete export keys) | Vault-documented export-key management surface | — |
+| `internal/builtin/logical/pki/path_roles.go` | `no_store_metadata` role parameter persisted and returned on role read/update | Vault-documented PKI role metadata-storage control | — |
+| `internal/vault/core.go` | +1 line in `configureLogicalBackends`: `logicalBackends["pki-external-ca"] = PKIExternalCAFactory` (factory in `internal/vault/logical_pki_external_ca.go` — kept out of the pki package to avoid a test-import cycle with `internal/http`) | Mount-type registration for the documented external-CA engine | — |
 
 ### Redundancy zones (compat-harness branch)
 

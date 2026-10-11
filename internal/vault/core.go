@@ -1318,6 +1318,7 @@ func (c *Core) configureLogicalBackends(backends map[string]logical.Factory, log
 	logicalBackends["kmip"] = KMIPBackendFactory
 	logicalBackends["keymgmt"] = KeyMgmtBackendFactory
 	logicalBackends["spiffe"] = spiffeFactory(false, c.redirectAddr)
+	logicalBackends["pki-external-ca"] = PKIExternalCAFactory
 
 	// Cubbyhole
 	logicalBackends["agent-registry"] = c.agentRegistryFactory

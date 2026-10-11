@@ -123,6 +123,9 @@ func Backend(conf *logical.BackendConfig) *backend {
 
 		Paths: []*framework.Path{
 			pathConfigSCEP(),
+			pathIssuanceConfig("est"),
+			pathIssuanceConfig("cmp"),
+			pathExternalPolicyConfig(),
 			pathListRoles(&b),
 			pathRoles(&b),
 			pathListCelRoles(&b),
@@ -230,6 +233,7 @@ func Backend(conf *logical.BackendConfig) *backend {
 	acmePaths = append(acmePaths, pathAcmeNewEab(&b)...) // auth'd API that lives underneath the various /acme paths
 
 	b.Paths = append(b.Paths, acmePaths...)
+	b.Paths = append(b.Paths, pathsExportKeys()...)
 
 	// Add specific un-auth'd paths for ACME APIs
 	for _, acmePrefix := range []string{"", "issuer/+/", "roles/+/", "issuer/+/roles/+/"} {

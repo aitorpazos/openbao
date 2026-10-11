@@ -380,6 +380,7 @@ lifetimes, it is recommended that lease generation be disabled, as large amount 
 leases adversely affect the startup time of OpenBao.`,
 		},
 
+		"no_store_metadata": {Type: framework.TypeBool, Description: "Disable certificate metadata storage independently of certificate storage."},
 		"no_store": {
 			Type: framework.TypeBool,
 			Description: `
@@ -820,6 +821,7 @@ lifetimes, it is recommended that lease generation be disabled, as large amount 
 leases adversely affect the startup time of OpenBao.`,
 			},
 
+			"no_store_metadata": {Type: framework.TypeBool, Description: "Disable certificate metadata storage independently of certificate storage."},
 			"no_store": {
 				Type: framework.TypeBool,
 				Description: `
@@ -1193,6 +1195,7 @@ func (b *backend) pathRoleCreate(ctx context.Context, req *logical.Request, data
 		PostalCode:                    data.Get("postal_code").([]string),
 		GenerateLease:                 new(bool),
 		NoStore:                       data.Get("no_store").(bool),
+		NoStoreMetadata:               data.Get("no_store_metadata").(bool),
 		RequireCN:                     data.Get("require_cn").(bool),
 		CNValidations:                 data.Get("cn_validations").([]string),
 		AllowedSerialNumbers:          data.Get("allowed_serial_numbers").([]string),
@@ -1447,6 +1450,7 @@ func (b *backend) pathRolePatch(ctx context.Context, req *logical.Request, data 
 		PostalCode:                    data.GetWithExplicitDefault("postal_code", oldEntry.PostalCode).([]string),
 		GenerateLease:                 new(bool),
 		NoStore:                       data.GetWithExplicitDefault("no_store", oldEntry.NoStore).(bool),
+		NoStoreMetadata:               data.GetWithExplicitDefault("no_store_metadata", oldEntry.NoStoreMetadata).(bool),
 		RequireCN:                     data.GetWithExplicitDefault("require_cn", oldEntry.RequireCN).(bool),
 		CNValidations:                 data.GetWithExplicitDefault("cn_validations", oldEntry.CNValidations).([]string),
 		AllowedSerialNumbers:          data.GetWithExplicitDefault("allowed_serial_numbers", oldEntry.AllowedSerialNumbers).([]string),
@@ -1691,6 +1695,7 @@ type roleEntry struct {
 	PostalCode                    []string      `json:"postal_code"`
 	GenerateLease                 *bool         `json:"generate_lease,omitempty"`
 	NoStore                       bool          `json:"no_store"`
+	NoStoreMetadata               bool          `json:"no_store_metadata"`
 	RequireCN                     bool          `json:"require_cn"`
 	CNValidations                 []string      `json:"cn_validations"`
 	AllowedOtherSANs              []string      `json:"allowed_other_sans"`
@@ -1756,6 +1761,7 @@ func (r *roleEntry) ToResponseData() map[string]any {
 		"street_address":                     r.StreetAddress,
 		"postal_code":                        r.PostalCode,
 		"no_store":                           r.NoStore,
+		"no_store_metadata":                  r.NoStoreMetadata,
 		"allowed_other_sans":                 r.AllowedOtherSANs,
 		"allowed_serial_numbers":             r.AllowedSerialNumbers,
 		"allowed_user_ids":                   r.AllowedUserIDs,
