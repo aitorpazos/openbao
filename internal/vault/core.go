@@ -1311,6 +1311,7 @@ func (c *Core) configureLogicalBackends(backends map[string]logical.Factory, log
 
 	// Transform configuration resources.
 	logicalBackends["transform"] = TransformBackendFactory
+	logicalBackends["kmip"] = KMIPBackendFactory
 
 	// Cubbyhole
 	logicalBackends[routing.MountTypeCubbyhole] = CubbyholeBackendFactory
