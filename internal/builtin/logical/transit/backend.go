@@ -70,6 +70,7 @@ func Backend(ctx context.Context, conf *logical.BackendConfig) (*backend, error)
 			b.pathRandom(),
 			b.pathHash(),
 			b.pathHMAC(),
+			b.pathCMAC(),
 			b.pathSign(),
 			b.pathVerify(),
 			b.pathBackup(),

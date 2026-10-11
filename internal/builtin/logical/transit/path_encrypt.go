@@ -20,6 +20,7 @@ import (
 
 // BatchRequestItem represents a request item for batch processing
 type BatchRequestItem struct {
+	IV string `json:"iv,omitempty" mapstructure:"iv"`
 	// Context for key derivation. This is required for derived keys.
 	Context string `json:"context" mapstructure:"context"`
 
@@ -91,7 +92,11 @@ func (b *backend) pathEncrypt() *framework.Path {
 
 			"context": {
 				Type:        framework.TypeString,
-				Description: "Base64 encoded context for key derivation. Required if key derivation is enabled",
+				Description: "Base64 encoded key derivation context.",
+			},
+			"iv": {
+				Type:        framework.TypeString,
+				Description: "Base64 encoded 16-byte CBC initialization vector. Omit for a random IV.",
 			},
 
 			"type": {
@@ -207,6 +212,13 @@ func decodeBatchRequestItems(src any, requirePlaintext bool, requireCiphertext b
 			return fmt.Errorf("[%d] expected a map, got '%T'", i, iitem)
 		}
 
+		if v, has := item["iv"]; has {
+			if casted, ok := v.(string); ok {
+				(*dst)[i].IV = casted
+			} else if v != nil {
+				errs = append(errs, fmt.Errorf("'[%d].iv' expected string", i))
+			}
+		}
 		if v, has := item["context"]; has {
 			if !reflect.ValueOf(v).IsValid() {
 			} else if casted, ok := v.(string); ok {
@@ -318,6 +330,7 @@ func (b *backend) pathEncryptWrite(ctx context.Context, req *logical.Request, d 
 
 		batchInputItems = make([]BatchRequestItem, 1)
 		batchInputItems[0] = BatchRequestItem{
+			IV:             d.Get("iv").(string),
 			Plaintext:      valueRaw.(string),
 			Context:        d.Get("context").(string),
 			KeyVersion:     d.Get("key_version").(int),
@@ -447,7 +460,13 @@ func (b *backend) pathEncryptWrite(ctx context.Context, req *logical.Request, d 
 			factories = append(factories, b.ExternalKeyFactory(ctx))
 		}
 
-		ciphertext, err := p.EncryptWithFactory(item.KeyVersion, item.DecodedContext, nil, item.Plaintext, factories...)
+		iv, ivErr := base64.StdEncoding.DecodeString(item.IV)
+		if ivErr != nil || (item.IV != "" && (!p.Type.IsCBC() || len(iv) != 16)) {
+			userErrorInBatch = true
+			batchResponseItems[i].Error = "iv must be base64 encoded 16 bytes and is only supported for CBC"
+			continue
+		}
+		ciphertext, err := p.EncryptWithFactory(item.KeyVersion, item.DecodedContext, iv, item.Plaintext, factories...)
 		if err != nil {
 			switch err.(type) {
 			case errutil.InternalError:

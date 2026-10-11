@@ -24,6 +24,10 @@ const (
 // PolicyRequest holds values used when requesting a policy. Most values are
 // only used during an upsert.
 type PolicyRequest struct {
+	APIType          string
+	ParameterSet     string
+	HybridKeyTypePQC string
+	HybridKeyTypeEC  string
 	// The storage to use
 	Storage logical.Storage
 
@@ -375,6 +379,14 @@ func (lm *LockManager) GetPolicyWithLockType(ctx context.Context, req PolicyRequ
 			if req.Derived || req.Convergent {
 				return nil, false, fmt.Errorf("key derivation and convergent encryption not supported for keys of type %v", req.KeyType)
 			}
+		case KeyType_AES128_CMAC, KeyType_AES192_CMAC, KeyType_AES256_CMAC, KeyType_AES128_CBC, KeyType_AES256_CBC:
+			if req.Convergent {
+				return nil, false, errors.New("convergent encryption is not supported for CBC or CMAC")
+			}
+		case KeyType_Hybrid:
+			if req.Derived || req.Convergent {
+				return nil, false, fmt.Errorf("key derivation and convergent encryption not supported for keys of type %v", req.KeyType)
+			}
 
 		case KeyType_ED25519:
 			if req.Convergent {
@@ -411,6 +423,10 @@ func (lm *LockManager) GetPolicyWithLockType(ctx context.Context, req PolicyRequ
 
 		p = &Policy{
 			l:                    new(sync.RWMutex),
+			APIType:              req.APIType,
+			ParameterSet:         req.ParameterSet,
+			HybridKeyTypePQC:     req.HybridKeyTypePQC,
+			HybridKeyTypeEC:      req.HybridKeyTypeEC,
 			Name:                 req.Name,
 			Type:                 req.KeyType,
 			Derived:              req.Derived,

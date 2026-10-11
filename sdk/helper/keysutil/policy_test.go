@@ -550,7 +550,7 @@ func Test_Import(t *testing.T) {
 		t.Fatalf("error generating test keys: %s", err)
 	}
 
-	tests := map[string]struct {
+	tests := map[string]*struct {
 		policy      Policy
 		key         []byte
 		shouldError bool

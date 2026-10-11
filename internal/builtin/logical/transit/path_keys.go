@@ -80,6 +80,9 @@ asymmetric) are supported. Defaults to "aes256-gcm96".
 `,
 			},
 
+			"parameter_set":       {Type: framework.TypeString, Description: "ML-DSA parameter set: 44, 65 or 87."},
+			"hybrid_key_type_pqc": {Type: framework.TypeString, Description: "Hybrid post-quantum algorithm."},
+			"hybrid_key_type_ec":  {Type: framework.TypeString, Description: "Hybrid classical algorithm."},
 			"derived": {
 				Type: framework.TypeBool,
 				Description: `Enables key derivation mode. This
@@ -279,6 +282,37 @@ func (b *backend) pathPolicyWrite(ctx context.Context, req *logical.Request, d *
 	}
 
 	switch keyType {
+	case "aes128-cmac":
+		polReq.KeyType = keysutil.KeyType_AES128_CMAC
+	case "aes192-cmac":
+		polReq.KeyType = keysutil.KeyType_AES192_CMAC
+	case "aes256-cmac":
+		polReq.KeyType = keysutil.KeyType_AES256_CMAC
+	case "aes128-cbc":
+		polReq.KeyType = keysutil.KeyType_AES128_CBC
+	case "aes256-cbc":
+		polReq.KeyType = keysutil.KeyType_AES256_CBC
+	case "ml-dsa", "hybrid":
+		polReq.APIType = keyType
+		polReq.ParameterSet = d.Get("parameter_set").(string)
+		switch polReq.ParameterSet {
+		case "44":
+			polReq.KeyType = keysutil.KeyType_MLDSA44
+		case "65":
+			polReq.KeyType = keysutil.KeyType_MLDSA65
+		case "87":
+			polReq.KeyType = keysutil.KeyType_MLDSA87
+		default:
+			return logical.ErrorResponse("parameter_set must be 44, 65 or 87"), logical.ErrInvalidRequest
+		}
+		if keyType == "hybrid" {
+			polReq.HybridKeyTypePQC = d.Get("hybrid_key_type_pqc").(string)
+			polReq.HybridKeyTypeEC = d.Get("hybrid_key_type_ec").(string)
+			if polReq.HybridKeyTypePQC != "ml-dsa" || polReq.HybridKeyTypeEC != "ecdsa-p256" {
+				return logical.ErrorResponse("hybrid requires hybrid_key_type_pqc=ml-dsa and hybrid_key_type_ec=ecdsa-p256"), logical.ErrInvalidRequest
+			}
+			polReq.KeyType = keysutil.KeyType_Hybrid
+		}
 	case "aes128-gcm96":
 		polReq.KeyType = keysutil.KeyType_AES128_GCM96
 	case "aes256-gcm96":
@@ -419,6 +453,17 @@ func (b *backend) formatKeyPolicy(p *keysutil.Policy, context []byte) (*logical.
 	if p.KeySize != 0 {
 		resp.Data["key_size"] = p.KeySize
 	}
+	if p.APIType != "" {
+		resp.Data["type"] = p.APIType
+	}
+	if p.ParameterSet != "" {
+		resp.Data["parameter_set"] = p.ParameterSet
+	}
+	if p.Type == keysutil.KeyType_Hybrid {
+		resp.Data["hybrid_key_type_pqc"] = p.HybridKeyTypePQC
+		resp.Data["hybrid_key_type_ec"] = p.HybridKeyTypeEC
+		resp.AddWarning("Hybrid configuration only; combined signing and verification are not implemented.")
+	}
 
 	if p.Imported {
 		resp.Data["imported_key_allow_rotation"] = p.AllowImportedKeyRotation
@@ -452,7 +497,8 @@ func (b *backend) formatKeyPolicy(p *keysutil.Policy, context []byte) (*logical.
 	}
 
 	switch p.Type {
-	case keysutil.KeyType_AES128_GCM96, keysutil.KeyType_AES256_GCM96, keysutil.KeyType_ChaCha20_Poly1305, keysutil.KeyType_XChaCha20_Poly1305:
+	case keysutil.KeyType_AES128_GCM96, keysutil.KeyType_AES256_GCM96, keysutil.KeyType_ChaCha20_Poly1305, keysutil.KeyType_XChaCha20_Poly1305,
+		keysutil.KeyType_AES128_CMAC, keysutil.KeyType_AES192_CMAC, keysutil.KeyType_AES256_CMAC, keysutil.KeyType_AES128_CBC, keysutil.KeyType_AES256_CBC, keysutil.KeyType_Hybrid:
 		retKeys := map[string]int64{}
 		for k, v := range p.Keys {
 			retKeys[k] = v.DeprecatedCreationTime

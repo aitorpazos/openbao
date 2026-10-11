@@ -76,6 +76,12 @@ const (
 	KeyType_MLDSA44
 	KeyType_MLDSA65
 	KeyType_MLDSA87
+	KeyType_AES128_CMAC
+	KeyType_AES192_CMAC
+	KeyType_AES256_CMAC
+	KeyType_AES128_CBC
+	KeyType_AES256_CBC
+	KeyType_Hybrid
 
 	// External keys is a meta-type.
 	KeyType_ExternalKey = 10000
@@ -133,6 +139,9 @@ type ecdsaSignature struct {
 type KeyType int
 
 func (kt KeyType) EncryptionSupported() bool {
+	if kt.IsCBC() {
+		return true
+	}
 	switch kt {
 	case KeyType_AES128_GCM96, KeyType_AES256_GCM96,
 		KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305,
@@ -144,6 +153,9 @@ func (kt KeyType) EncryptionSupported() bool {
 }
 
 func (kt KeyType) DecryptionSupported() bool {
+	if kt.IsCBC() {
+		return true
+	}
 	switch kt {
 	case KeyType_AES128_GCM96, KeyType_AES256_GCM96,
 		KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305,
@@ -155,6 +167,9 @@ func (kt KeyType) DecryptionSupported() bool {
 }
 
 func (kt KeyType) SigningSupported() bool {
+	if kt == KeyType_Hybrid {
+		return true
+	}
 	switch kt {
 	case KeyType_ECDSA_P256, KeyType_ECDSA_P384, KeyType_ECDSA_P521, KeyType_ED25519,
 		KeyType_RSA2048, KeyType_RSA3072, KeyType_RSA4096,
@@ -185,6 +200,9 @@ func (kt KeyType) HashSignatureInput() bool {
 }
 
 func (kt KeyType) DerivationSupported() bool {
+	if kt.IsCBC() || kt.IsCMAC() {
+		return true
+	}
 	switch kt {
 	case KeyType_AES128_GCM96, KeyType_AES256_GCM96,
 		KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305,
@@ -237,6 +255,18 @@ func (kt KeyType) DefaultHashAlgorithm() HashType {
 
 func (kt KeyType) String() string {
 	switch kt {
+	case KeyType_AES128_CMAC:
+		return "aes128-cmac"
+	case KeyType_AES192_CMAC:
+		return "aes192-cmac"
+	case KeyType_AES256_CMAC:
+		return "aes256-cmac"
+	case KeyType_AES128_CBC:
+		return "aes128-cbc"
+	case KeyType_AES256_CBC:
+		return "aes256-cbc"
+	case KeyType_Hybrid:
+		return "hybrid"
 	case KeyType_AES128_GCM96:
 		return "aes128-gcm96"
 	case KeyType_AES256_GCM96:
@@ -449,6 +479,11 @@ func LoadPolicy(ctx context.Context, s logical.Storage, path string) (*Policy, e
 
 // Policy is the struct used to store metadata
 type Policy struct {
+	// APIType preserves the documented alias without changing existing key types.
+	APIType          string `json:"api_type,omitempty"`
+	ParameterSet     string `json:"parameter_set,omitempty"`
+	HybridKeyTypePQC string `json:"hybrid_key_type_pqc,omitempty"`
+	HybridKeyTypeEC  string `json:"hybrid_key_type_ec,omitempty"`
 	// This is a pointer on purpose: if we are running with cache disabled we
 	// need to actually swap in the lock manager's lock for this policy with
 	// the local lock.
@@ -930,7 +965,8 @@ func (p *Policy) DeriveKey(context, salt []byte, ver int, numBytes int) ([]byte,
 		}
 
 		switch p.Type {
-		case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305:
+		case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305,
+			KeyType_AES128_CMAC, KeyType_AES192_CMAC, KeyType_AES256_CMAC, KeyType_AES128_CBC, KeyType_AES256_CBC:
 			n, err := derBytes.ReadFrom(limReader)
 			if err != nil {
 				return nil, errutil.InternalError{Err: fmt.Sprintf("error reading returned derived bytes: %v", err)}
@@ -1144,6 +1180,15 @@ func (p *Policy) DecryptWithFactory(derivationContext, nonce []byte, value strin
 	var plain []byte
 
 	switch p.Type {
+	case KeyType_AES128_CBC, KeyType_AES256_CBC:
+		key, keyErr := p.GetKey(derivationContext, ver, p.Type.AESKeyBytes())
+		if keyErr != nil {
+			return "", keyErr
+		}
+		plain, err = decryptCBC(key, decoded)
+		if err != nil {
+			return "", err
+		}
 	case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305:
 		numBytes := 32
 		if p.Type == KeyType_AES128_GCM96 {
@@ -1974,6 +2019,15 @@ func (p *Policy) RotateInMemory(randReader io.Reader) (retErr error) {
 	entry.HMACKey = hmacKey
 
 	switch p.Type {
+	case KeyType_Hybrid:
+		// Configuration-only: no combined signature encoding is specified by the
+		// landed API contract. Signing fails explicitly rather than emitting a
+		// single-algorithm signature disguised as hybrid.
+	case KeyType_AES128_CMAC, KeyType_AES192_CMAC, KeyType_AES256_CMAC, KeyType_AES128_CBC, KeyType_AES256_CBC:
+		entry.Key, err = uuid.GenerateRandomBytesWithReader(p.Type.AESKeyBytes(), randReader)
+		if err != nil {
+			return err
+		}
 	case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305, KeyType_HMAC:
 		// Default to 256 bit key
 		numBytes := 32
@@ -2394,6 +2448,15 @@ func (p *Policy) EncryptWithFactory(ver int, derivationContext []byte, nonce []b
 	var ciphertext []byte
 
 	switch p.Type {
+	case KeyType_AES128_CBC, KeyType_AES256_CBC:
+		key, keyErr := p.GetKey(derivationContext, ver, p.Type.AESKeyBytes())
+		if keyErr != nil {
+			return "", keyErr
+		}
+		ciphertext, err = encryptCBC(key, plaintext, nonce)
+		if err != nil {
+			return "", err
+		}
 	case KeyType_AES128_GCM96, KeyType_AES256_GCM96, KeyType_ChaCha20_Poly1305, KeyType_XChaCha20_Poly1305:
 		hmacKey := derivationContext
 

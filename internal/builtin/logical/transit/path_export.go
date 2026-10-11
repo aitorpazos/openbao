@@ -87,6 +87,7 @@ func (b *backend) pathPolicyExportRead(ctx context.Context, req *logical.Request
 	switch exportType {
 	case exportTypeEncryptionKey:
 	case exportTypeSigningKey:
+	case "cmac-key":
 	case exportTypeHMACKey:
 	case exportTypePublicKey:
 	case exportTypeCertificateChain:
@@ -127,6 +128,10 @@ func (b *backend) pathPolicyExportRead(ctx context.Context, req *logical.Request
 	case exportTypeEncryptionKey:
 		if !p.Type.EncryptionSupported() {
 			return logical.ErrorResponse("encryption not supported for the key"), logical.ErrInvalidRequest
+		}
+	case "cmac-key":
+		if !p.Type.IsCMAC() {
+			return logical.ErrorResponse("CMAC not supported for the key"), logical.ErrInvalidRequest
 		}
 	case exportTypeSigningKey:
 		if !p.Type.SigningSupported() {
@@ -194,6 +199,11 @@ func getExportKey(policy *keysutil.Policy, key *keysutil.KeyEntry, exportType st
 	}
 
 	switch exportType {
+	case "cmac-key":
+		if !policy.Type.IsCMAC() || (format != "" && format != "raw") {
+			return "", errors.New("CMAC export requires a CMAC key and raw format")
+		}
+		return base64.StdEncoding.EncodeToString(key.Key), nil
 	case exportTypeHMACKey:
 		src := key.HMACKey
 		if policy.Type == keysutil.KeyType_HMAC {
@@ -206,7 +216,7 @@ func getExportKey(policy *keysutil.Policy, key *keysutil.KeyEntry, exportType st
 		return strings.TrimSpace(base64.StdEncoding.EncodeToString(src)), nil
 	case exportTypeEncryptionKey:
 		switch policy.Type {
-		case keysutil.KeyType_AES128_GCM96, keysutil.KeyType_AES256_GCM96, keysutil.KeyType_ChaCha20_Poly1305, keysutil.KeyType_XChaCha20_Poly1305:
+		case keysutil.KeyType_AES128_GCM96, keysutil.KeyType_AES256_GCM96, keysutil.KeyType_ChaCha20_Poly1305, keysutil.KeyType_XChaCha20_Poly1305, keysutil.KeyType_AES128_CBC, keysutil.KeyType_AES256_CBC:
 			if format == "der" || format == "pem" {
 				return "", errors.New("unknown format for HMAC key; supported values are `` or `raw`")
 			}
