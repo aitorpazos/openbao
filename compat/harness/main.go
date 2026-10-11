@@ -235,7 +235,10 @@ func substituteCaptured(v any, capturedData map[string]string) (any, error) {
 			if val, ok := capturedData[name]; ok {
 				return val, nil
 			}
-			return nil, fmt.Errorf("unknown capture reference $%s", name)
+			// Not a known capture slot: pass the literal through so spec
+			// bodies can legitimately contain $-prefixed content (regex
+			// capture groups like "$1-$2-$3", shell fragments). The
+			// substitute-if-known contract is documented in the README.
 		}
 		return t, nil
 	default:

@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MPL-2.0
+api: transform-mount-setup
+feature: transform
+source: https://developer.hashicorp.com/vault/api-docs/secret/transform
+source_version: "v2.x (latest)"
+notes: >-
+  Mounts the transform secrets engine for the other transform spec files,
+  which are written against the documented transform API and require an
+  existing transform/ mount (their own notes say so). 400 is tolerated for
+  reruns against a server where the mount already exists. The mount is left
+  in place; cleanup would break reruns of the sibling files in this
+  directory.
+cases:
+  - id: mount-transform
+    request:
+      method: POST
+      path: /v1/sys/mounts/transform
+      body: {type: transform}
+    expect:
+      status: [200, 204, 400]

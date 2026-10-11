@@ -59,7 +59,8 @@ cases:
 #   use_captured_token: true         # send slot "token" as X-Vault-Token
 #   use_captured_token: accessor     # send the named slot instead
 # Body strings beginning with "$" are substituted from the captured slots:
-#   body: {accessor: "$accessor"}    # unknown names fail the case with ERROR
+#   body: {accessor: "$accessor"}    # unknown "$name" is passed through
+#                                    # literally (e.g. regex groups "$1-$2")
 ```
 
 ### body_schema subset
