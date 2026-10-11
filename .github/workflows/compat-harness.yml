@@ -1,0 +1,158 @@
+name: compat-harness
+
+# Enterprise-parity conformance harness: builds the server, starts a dev
+# instance, and runs the spec-driven compatibility suite. Dev-mode servers
+# use non-raft storage, so raft-only surfaces (autopilot state, auto
+# snapshots) are intentionally FEATURE_ABSENT here; their live verification
+# uses a raft-backed server instead (see the raft job below).
+
+on:
+  merge_group:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "compat/**"
+      - "internal/vault/**"
+      - "internal/http/**"
+      - "sdk/logical/**"
+      - "sdk/framework/**"
+  push:
+    branches:
+      - compat-harness
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}-compat
+  cancel-in-progress: true
+
+jobs:
+  harness:
+    name: Conformance harness (dev server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build server
+        run: go build -o bin/bao .
+
+      - name: Harness unit tests
+        run: |
+          cd compat/harness
+          go test ./... -count=1
+
+      - name: Start dev server
+        run: |
+          ./bin/bao server -dev \
+            -dev-root-token-id=compat-harness \
+            -dev-listen-address=127.0.0.1:28200 \
+            > /tmp/bao-dev.log 2>&1 &
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28200/v1/sys/health || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          [ "$code" = "200" ] || { cat /tmp/bao-dev.log; exit 1; }
+
+      - name: Run conformance suite
+        id: harness
+        run: |
+          cd compat/harness
+          go run . --target http://127.0.0.1:28200 --token compat-harness \
+            --specs ../specs --format table > /tmp/harness-output.txt || true
+          cat /tmp/harness-output.txt
+
+          # Fail the job on real mismatches only: FAIL (assertion mismatch),
+          # ERROR (transport), or FEATURE_ABSENT under --strict is not used
+          # here because unmounted engines legitimately report FEATURE_ABSENT.
+          if grep -qE '^(FAIL|ERROR)' /tmp/harness-output.txt; then
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "status=passed" >> "$GITHUB_OUTPUT"
+
+      - name: Upload harness output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-output
+          path: /tmp/harness-output.txt
+          retention-days: 7
+
+  harness-raft:
+    name: Conformance harness (raft-backed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build server
+        run: go build -o bin/bao .
+
+      - name: Configure raft-backed server
+        run: |
+          mkdir -p /tmp/bao-raft-ci
+          cat > /tmp/bao-raft.hcl <<'EOF'
+          storage "raft" {
+            node_id = "ci-node"
+            path    = "/tmp/bao-raft-ci"
+          }
+          listener "tcp" {
+            address     = "127.0.0.1:28300"
+            tls_disable = 1
+          }
+          disable_mlock = true
+          api_addr      = "http://127.0.0.1:28300"
+          cluster_addr  = "https://127.0.0.1:28301"
+          EOF
+
+      - name: Init, unseal, and run raft-only suites
+        run: |
+          ./bin/bao server -config=/tmp/bao-raft.hcl > /tmp/bao-raft.log 2>&1 &
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28300/v1/sys/health || true)
+            [ "$code" = "501" ] && break
+            sleep 1
+          done
+          curl -s -X POST -d '{"secret_shares":1,"secret_threshold":1}' \
+            http://127.0.0.1:28300/v1/sys/init > /tmp/init.json
+          key=$(python3 -c "import json;print(json.load(open('/tmp/init.json'))['keys'][0])")
+          curl -s -X PUT -d "{\"key\":\"$key\"}" http://127.0.0.1:28300/v1/sys/unseal > /dev/null
+          for i in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:28300/v1/sys/health || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          [ "$code" = "200" ] || { cat /tmp/bao-raft.log; exit 1; }
+
+          cd compat/harness
+          # Raft-gated feature specs. Auto-snapshot fixtures write to /tmp
+          # (the CI runner has no cloud credentials; specs are local-only).
+          go run . --target http://127.0.0.1:28300 \
+            --token "$(python3 -c "import json;print(json.load(open('/tmp/init.json'))['root_token'])")" \
+            --specs ../specs/raft-autosnapshot --format table | tee /tmp/harness-raft.txt
+          if grep -qE '^(FAIL|ERROR)' /tmp/harness-raft.txt; then
+            exit 1
+          fi
+
+      - name: Upload raft harness output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-raft-output
+          path: /tmp/harness-raft.txt
+          retention-days: 7
