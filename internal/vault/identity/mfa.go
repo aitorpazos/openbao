@@ -133,6 +133,7 @@ type MFABackend interface {
 	Lock()
 	Unlock()
 	HandleMFAGenerateTOTP(context.Context, *mfa.Config, string) (*logical.Response, error)
+	ValidateMFASelfEnrollment(context.Context, string, string, string) error
 	ValidateAuthEntriesForAccessorOrType(context.Context, *namespace.Namespace, func(entry *routing.MountEntry) bool) (bool, error)
 	CleanupNamespace(context.Context, *namespace.Namespace, bool) error
 
@@ -326,6 +327,28 @@ func (i *IdentityStore) handleMFAMethodDeleteCommon(ctx context.Context, req *lo
 
 func (i *IdentityStore) handleLoginMFAGenerateUpdate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	return i.handleLoginMFAGenerateCommon(ctx, req, d.Get("method_id").(string), req.EntityID)
+}
+
+func (i *IdentityStore) handleLoginMFASelfEnrollUpdate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	requestID := d.Get("mfa_request_id").(string)
+	methodID := d.Get("mfa_method_id").(string)
+	if requestID == "" || methodID == "" {
+		return logical.ErrorResponse("missing mfa_request_id or mfa_method_id"), nil
+	}
+	if req.EntityID == "" {
+		return logical.ErrorResponse("self-enrollment requires an entity-backed token"), nil
+	}
+	config, err := i.mfaBackend.MemDBMFAConfigByID(methodID)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil || config.Type != MfaMethodTypeTOTP || !config.GetTOTPConfig().GetEnableSelfEnrollment() {
+		return logical.ErrorResponse("TOTP self-enrollment is not enabled for this method"), nil
+	}
+	if err := i.mfaBackend.ValidateMFASelfEnrollment(ctx, requestID, req.EntityID, methodID); err != nil {
+		return logical.ErrorResponse(err.Error()), nil
+	}
+	return i.handleLoginMFAGenerateCommon(ctx, req, methodID, req.EntityID)
 }
 
 func (i *IdentityStore) handleLoginMFAAdminGenerateUpdate(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
@@ -732,6 +755,7 @@ func parseTOTPConfig(mConfig *mfa.Config, d *framework.FieldData) error {
 		KeySize:               uint32(keySize),
 		QRSize:                int32(d.Get("qr_size").(int)),
 		MaxValidationAttempts: uint32(maxValidationAttempt),
+		EnableSelfEnrollment:  d.Get("enable_self_enrollment").(bool),
 	}
 	mConfig.Config = &mfa.Config_TOTPConfig{
 		TOTPConfig: config,

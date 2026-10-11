@@ -363,6 +363,11 @@ func mfaPaths(i *IdentityStore) []*framework.Path {
 					Type:        framework.TypeInt,
 					Description: `Max number of allowed validation attempts.`,
 				},
+				"enable_self_enrollment": {
+					Type:        framework.TypeBool,
+					Default:     false,
+					Description: "Allow users to enroll their own entity in TOTP MFA.",
+				},
 				"issuer": {
 					Type:        framework.TypeString,
 					Description: `The name of the key's issuing organization.`,
@@ -436,6 +441,19 @@ func mfaPaths(i *IdentityStore) []*framework.Path {
 				logical.ListOperation: &framework.PathOperation{
 					Callback: i.handleMFAMethodListTOTP,
 					Summary:  "List MFA method configurations for the given MFA method",
+				},
+			},
+		},
+		{
+			Pattern: "mfa/method/totp/self-enroll$",
+			Fields: map[string]*framework.FieldSchema{
+				"mfa_request_id": {Type: framework.TypeString, Required: true, Description: "Identifier of the pending MFA login request."},
+				"mfa_method_id":  {Type: framework.TypeString, Required: true, Description: "Identifier of the TOTP MFA method."},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: i.handleLoginMFASelfEnrollUpdate,
+					Summary:  "Generate a TOTP secret for the calling entity when self-enrollment is enabled.",
 				},
 			},
 		},

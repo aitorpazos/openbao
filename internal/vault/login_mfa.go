@@ -564,6 +564,51 @@ func (c *Core) fetchTOTPKey(ctx context.Context, methodID, entityID string) (str
 	return ks.Key, nil
 }
 
+// ValidateMFASelfEnrollment binds enrollment to an unexpired login for the
+// calling entity. Inspect and restore the pending request atomically; enrollment
+// must not consume it, since the user still needs to validate their TOTP code.
+func (b *MFABackend) ValidateMFASelfEnrollment(ctx context.Context, requestID, entityID, methodID string) error {
+	ns, err := namespace.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+	b.Core.mfaResponseAuthQueueLock.Lock()
+	defer b.Core.mfaResponseAuthQueueLock.Unlock()
+	q := b.Core.mfaResponseAuthQueue
+	if q == nil {
+		return errors.New("invalid MFA request ID")
+	}
+	cached, err := q.PopByKey(requestID)
+	if err != nil || cached == nil {
+		return errors.New("invalid MFA request ID")
+	}
+	if !time.Now().Before(cached.TimeOfStorage.Add(defaultMFAAuthResponseTTL)) {
+		return errors.New("expired MFA request ID")
+	}
+	if err := q.Push(cached); err != nil {
+		return err
+	}
+	if cached.RequestNSID != ns.ID || cached.CachedAuth == nil || cached.CachedAuth.EntityID != entityID {
+		return errors.New("MFA request does not belong to the calling entity and namespace")
+	}
+	entity, err := b.Core.identityStore.MemDBEntityByID(ctx, entityID, true)
+	if err != nil || entity == nil || entity.Disabled {
+		return errors.New("invalid entity for MFA self-enrollment")
+	}
+	enforcements, err := b.Core.buildMFAEnforcementConfigList(ctx, entity, cached.RequestPath)
+	if err != nil {
+		return err
+	}
+	for _, enforcement := range enforcements {
+		for _, id := range enforcement.MFAMethodIDs {
+			if id == methodID {
+				return nil
+			}
+		}
+	}
+	return errors.New("MFA method is not required by the pending login")
+}
+
 func (b *MFABackend) HandleMFAGenerateTOTP(ctx context.Context, mConfig *mfa.Config, entityID string) (*logical.Response, error) {
 	var err error
 	var totpConfig *mfa.TOTPConfig
@@ -813,6 +858,7 @@ func (b *MFABackend) mfaConfigToMap(mConfig *mfa.Config) (map[string]any, error)
 		respData["qr_size"] = totpConfig.QRSize
 		respData["algorithm"] = otplib.Algorithm(totpConfig.Algorithm).String()
 		respData["max_validation_attempts"] = totpConfig.MaxValidationAttempts
+		respData["enable_self_enrollment"] = totpConfig.EnableSelfEnrollment
 	case *mfa.Config_OktaConfig:
 		oktaConfig := mConfig.GetOktaConfig()
 		respData["org_name"] = oktaConfig.OrgName
