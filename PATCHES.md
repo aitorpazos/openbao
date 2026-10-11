@@ -84,6 +84,10 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/builtin/logical/pki/path_export_keys.go` (new) | Export-key management paths (generate/list/get/delete export keys) | Vault-documented export-key management surface | — |
 | `internal/builtin/logical/pki/path_roles.go` | `no_store_metadata` role parameter persisted and returned on role read/update | Vault-documented PKI role metadata-storage control | — |
 | `internal/vault/core.go` | +1 line in `configureLogicalBackends`: `logicalBackends["pki-external-ca"] = PKIExternalCAFactory` (factory in `internal/vault/logical_pki_external_ca.go` — kept out of the pki package to avoid a test-import cycle with `internal/http`) | Mount-type registration for the documented external-CA engine | — |
+| `internal/helper/builtinplugins/registry.go` | +9 lines: ldap/aws/azure/gcp credential + logical factory registrations | Mount types for the documented LDAP/cloud engines (OpenBao ships these upstream as external plugins; config-only implementations in-tree) | — |
+| `internal/vault/identity/store.go`, `internal/vault/identity/store_oidc.go` | +OIDC workload path registrations in the identity store path builders | Plugin-token and secrets-sync discovery/JWKS endpoints per landed spec | — |
+| `internal/builtin/credential/ldap/backend.go` | static-migration empty-status returns an empty response instead of nil (nil renders as HTTP 404 on reads) | Conformance: documented empty migration status is 200/204 | — |
+| `internal/builtin/logical/database/path_config_connection.go`, `path_roles.go` | rootless-rotation connection fields + static-role password/skip-import-rotation fields | Vault-documented database rotation config surface | — |
 
 ### Redundancy zones (compat-harness branch)
 

@@ -4067,6 +4067,7 @@ func TestReadWriteDeleteRoles(t *testing.T) {
 		"key_bits":                           json.Number("2048"),
 		"max_ttl":                            json.Number("0"),
 		"no_store":                           false,
+		"no_store_metadata":                  false,
 		"organization":                       []any{},
 		"province":                           []any{},
 		"street_address":                     []any{},
@@ -7451,6 +7452,12 @@ func TestProperAuthing(t *testing.T) {
 		"certs/detailed":                         shouldBeAuthed,
 		"certs/revoked":                          shouldBeAuthed,
 		"config/acme":                            shouldBeAuthed,
+		"config/scep":                            shouldBeAuthed,
+		"config/est":                             shouldBeAuthed,
+		"config/cmp":                             shouldBeAuthed,
+		"config/external-policy":                 shouldBeAuthed,
+		"export":                                 shouldBeAuthed,
+		"export/" + eabKid:                       shouldBeAuthed,
 		"config/auto-tidy":                       shouldBeAuthed,
 		"config/ca":                              shouldBeAuthed,
 		"config/cluster":                         shouldBeAuthed,
@@ -7592,6 +7599,9 @@ func TestProperAuthing(t *testing.T) {
 		}
 		if strings.Contains(raw_path, "{key_ref}") {
 			raw_path = strings.ReplaceAll(raw_path, "{key_ref}", "default")
+		}
+		if strings.Contains(raw_path, "{export_key_uuid}") {
+			raw_path = strings.ReplaceAll(raw_path, "{export_key_uuid}", eabKid)
 		}
 		if strings.Contains(raw_path, "{exported}") {
 			raw_path = strings.ReplaceAll(raw_path, "{exported}", "internal")
