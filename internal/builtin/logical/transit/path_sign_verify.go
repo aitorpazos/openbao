@@ -115,6 +115,11 @@ func (b *backend) pathSign() *framework.Path {
 				Description: "The base64-encoded input data",
 			},
 
+			"signature_context": {
+				Type:        framework.TypeString,
+				Description: "Base64-encoded Ed25519 signature context, at most 255 bytes; distinct from key derivation context.",
+			},
+
 			"context": {
 				Type: framework.TypeString,
 				Description: `Base64 encoded context for key derivation. Required if key
@@ -138,7 +143,8 @@ derivation is enabled; currently only available with ed25519 keys.`,
 * none
 
 Defaults to "sha2-256" for RSA- and ECDSA-type keys, and "none" otherwise. Not
-valid for all key types, including Ed25519 and ML-DSA. Using "none" with a key
+valid for all key types. Ed25519ph requires "sha2-512" with prehashed=true;
+ordinary Ed25519 and Ed25519ctx do not prehash input. Using "none" with a key
 type that otherwise requires a hash function requires setting prehashed=true
 and signature_algorithm=pkcs1v15, yielding a PKCSv1_5_NoOID instead of the usual
 PKCSv1_5_DERnull signature. "mldsa-mu" is only valid for prehashed input for
@@ -220,6 +226,11 @@ func (b *backend) pathVerify() *framework.Path {
 			"name": {
 				Type:        framework.TypeString,
 				Description: "The key to use",
+			},
+
+			"signature_context": {
+				Type:        framework.TypeString,
+				Description: "Base64-encoded Ed25519 signature context, at most 255 bytes; distinct from key derivation context.",
 			},
 
 			"context": {
@@ -405,8 +416,9 @@ func (b *backend) pathSignWrite(ctx context.Context, req *logical.Request, d *fr
 		// use empty string if input is missing - not an error
 		batchInputItems = make([]batchRequestSignItem, 1)
 		batchInputItems[0] = batchRequestSignItem{
-			"input":   d.Get("input").(string),
-			"context": d.Get("context").(string),
+			"signature_context": d.Get("signature_context").(string),
+			"input":             d.Get("input").(string),
+			"context":           d.Get("context").(string),
 		}
 	}
 
@@ -449,15 +461,20 @@ func (b *backend) pathSignWrite(ctx context.Context, req *logical.Request, d *fr
 			}
 		}
 
-		sig, err := p.SignWithOptions(ver, context, input, &keysutil.SigningOptions{
+		sig, err := signWithContext(p, ver, context, input, &keysutil.SigningOptions{
 			HashAlgorithm:      hashAlgorithm,
 			Prehashed:          prehashed,
 			Marshaling:         marshaling,
 			SaltLength:         saltLength,
 			SigAlgorithm:       sigAlgorithm,
 			ExternalKeyFactory: b.ExternalKeyFactory(ctx),
-		})
+		}, item["signature_context"])
 		if err != nil {
+			if _, ok := err.(errutil.UserError); ok {
+				response[i].Error = err.Error()
+				response[i].err = logical.ErrInvalidRequest
+				continue
+			}
 			if batchInputRaw != nil {
 				response[i].Error = err.Error()
 			}
@@ -535,6 +552,7 @@ func (b *backend) pathVerifyWrite(ctx context.Context, req *logical.Request, d *
 			batchInputItems[0]["hmac"] = hmac.(string)
 		}
 		batchInputItems[0]["context"] = d.Get("context").(string)
+		batchInputItems[0]["signature_context"] = d.Get("signature_context").(string)
 	}
 
 	// For simplicity, 'signature' and 'hmac' cannot be mixed across batch_input elements.
@@ -676,7 +694,7 @@ func (b *backend) pathVerifyWrite(ctx context.Context, req *logical.Request, d *
 			ExternalKeyFactory: b.ExternalKeyFactory(ctx),
 		}
 
-		valid, err := p.VerifySignatureWithOptions(context, input, sig, signingOptions)
+		valid, err := verifyWithContext(p, context, input, sig, signingOptions, item["signature_context"])
 		if err != nil {
 			switch err.(type) {
 			case errutil.UserError:
