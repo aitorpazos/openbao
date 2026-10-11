@@ -181,6 +181,31 @@ generated client cert, Discover Versions/Create/Get/Destroy; Sign; concurrent
 lifecycle; HTTP control plane) green; `compat/specs/kmip/*.yaml` 38/38 PASS
 unchanged on a fresh dev server.
 
+### Raft auto-snapshots (compat-harness branch)
+
+**Status:** implemented. Specs first (`compat/specs/raft-autosnapshot/` — config
+CRUD/list/status, 19 cases derived from Vault Enterprise docs v2.x latest),
+implementation (`logical_system_raft_autosnapshot.go` + scheduler + tests +
+`raft_autosnapshot_notes.md` contract notes).
+**Modified pre-existing file:** `logical_system.go` — +1 line inside the
+existing `GetRaftBackend()` block: `b.setupAutoSnapshots()` (starts the
+snapshot worker; paths registered via the existing `raftStoragePaths()`).
+**Semantics:** config ops require sudo, root-namespace only; config in barrier
+storage; `interval` required; `retain` defaults 1; `file_prefix` defaults
+`vault-snapshot`; only `storage_type: local` implemented (cloud types rejected
+with invalid-request); files `<file_prefix>-<UTC-nanos>.snap`, mode 0600,
+atomic rename; `local_max_space` eviction of oldest matching snapshots;
+in-memory node-local status; worker skipped while sealed/standby/DR-secondary;
+config changes cancel in-progress matching exports.
+**Deferred:** cloud storage backends, autoload, snapshot-load recovery,
+multi-process directory coordination (notes.md).
+Acceptance: `go test ./internal/vault -run AutoSnapshot` (config CRUD,
+scheduler producing snapshots in t.TempDir with interval + local_max_space
+eviction, cancel-on-delete) green; `compat/specs/raft-autosnapshot/*.yaml`
+19/19 PASS live on a raft-backed server (HCL config + init/unseal, not
+dev-mode: dev-mode storage lacks the raft backend, so the paths are
+FEATURE_ABSENT there — same artifact as autopilot-state).
+
 ### Namespaces (compat-namespaces branch)
 
 Additive (`compat/`): `compat/specs/namespaces/` — 5 spec files (api-lock, crud,

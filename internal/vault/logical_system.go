@@ -176,6 +176,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	}
 	if backend := core.GetRaftBackend(); backend != nil {
 		b.Paths = append(b.Paths, b.raftStoragePaths()...)
+		b.setupAutoSnapshots()
 	}
 
 	if core.allowUnauthedWorkflows {
