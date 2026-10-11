@@ -1,0 +1,73 @@
+api: kmip_roles
+feature: kmip
+source: https://developer.hashicorp.com/vault/api-docs/secret/kmip
+source_version: "v2.x (latest)"
+notes: >
+  Write scope, Write role, Read role, List roles, Delete role, Delete scope.
+  Pseudo-operation exclusion is also documented at
+  https://developer.hashicorp.com/vault/docs/secrets/kmip#supported-kmip-operations
+  (v2.x (latest)). No required template exists on roles. No listener/config write.
+  Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/mounts
+  (v2.x (latest)). Status/error envelope:
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and #error-response
+  (v2.x (latest)); 400 is derived from the general invalid-data contract, not a
+  KMIP-specific error sample. No undocumented error-message matching.
+  Run serially on a disposable target; compat-kmip must not already exist.
+cases:
+  - id: roles-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-kmip, body: {type: kmip}}
+    expect: {status: [200, 204, 400]}
+  - id: scope-create-no-body-fields
+    depends: [roles-mount]
+    request: {method: POST, path: /v1/compat-kmip/scope/compat-scope, body: {}}
+    expect: {status: [200, 204]}
+  - id: scope-list
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: LIST, path: /v1/compat-kmip/scope}
+    expect: {status: 200, exact: {data.keys: [compat-scope]}}
+  - id: role-all-and-none
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: POST, path: /v1/compat-kmip/scope/compat-scope/role/invalid, body: {operation_all: true, operation_none: true}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: role-all-and-get
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: POST, path: /v1/compat-kmip/scope/compat-scope/role/invalid, body: {operation_all: true, operation_get: true}}
+    expect: *invalid
+  - id: role-none-and-create
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: POST, path: /v1/compat-kmip/scope/compat-scope/role/invalid, body: {operation_none: true, operation_create: true}}
+    expect: *invalid
+  - id: role-all-and-encrypt
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: POST, path: /v1/compat-kmip/scope/compat-scope/role/invalid, body: {operation_all: true, operation_encrypt: true}}
+    expect: *invalid
+  - id: role-none-and-revoke
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: POST, path: /v1/compat-kmip/scope/compat-scope/role/invalid, body: {operation_none: true, operation_revoke: true}}
+    expect: *invalid
+  - id: role-create-no-template
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: POST, path: /v1/compat-kmip/scope/compat-scope/role/compat-role, body: {operation_get: true}}
+    expect: {status: [200, 204]}
+  - id: role-read
+    depends: [roles-mount, scope-create-no-body-fields, role-create-no-template]
+    request: {method: GET, path: /v1/compat-kmip/scope/compat-scope/role/compat-role}
+    expect: {status: 200, exact: {data.operation_get: true}}
+  - id: role-list
+    depends: [roles-mount, scope-create-no-body-fields, role-create-no-template, role-all-and-none, role-all-and-get, role-none-and-create, role-all-and-encrypt, role-none-and-revoke]
+    request: {method: LIST, path: /v1/compat-kmip/scope/compat-scope/role}
+    expect: {status: 200, exact: {data.keys: [compat-role]}}
+  - id: role-cleanup
+    depends: [roles-mount, scope-create-no-body-fields, role-create-no-template]
+    request: {method: DELETE, path: /v1/compat-kmip/scope/compat-scope/role/compat-role}
+    expect: {status: [200, 204]}
+  - id: scope-cleanup
+    depends: [roles-mount, scope-create-no-body-fields]
+    request: {method: DELETE, path: '/v1/compat-kmip/scope/compat-scope?force=true'}
+    expect: {status: [200, 204]}
+  - id: roles-unmount
+    depends: [roles-mount]
+    request: {method: DELETE, path: /v1/sys/mounts/compat-kmip}
+    expect: {status: [200, 204]}

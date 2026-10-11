@@ -1,0 +1,64 @@
+api: kmip_ca_listener_validation
+feature: kmip
+source: https://developer.hashicorp.com/vault/api-docs/secret/kmip
+source_version: "v2.x (latest)"
+notes: >
+  Generate CA, Import CA, Write listener document the required fields and
+  key-type/key-size constraints tested here. No valid listener is started.
+  Listener missing-address also references a nonexistent CA: rejection only,
+  not validation-order coverage. Import malformed PEM is a format-contract
+  negative. Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/mounts
+  (v2.x (latest)). 400 and errors[] derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and #error-response
+  (v2.x (latest)); the KMIP page gives no endpoint-specific error samples.
+  Run serially on a disposable target with compat-kmip initially absent.
+cases:
+  - id: ca-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-kmip, body: {type: kmip}}
+    expect: {status: [200, 204, 400]}
+  - id: ca-generate-missing-key-type
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/ca/invalid/generate, body: {key_bits: 2048}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: ca-generate-missing-key-bits
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/ca/invalid/generate, body: {key_type: rsa}}
+    expect: *invalid
+  - id: ca-generate-invalid-key-type
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/ca/invalid/generate, body: {key_type: unsupported, key_bits: 2048}}
+    expect: *invalid
+  - id: ca-generate-invalid-rsa-bits
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/ca/invalid/generate, body: {key_type: rsa, key_bits: 123}}
+    expect: *invalid
+  - id: ca-generate-invalid-ec-bits
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/ca/invalid/generate, body: {key_type: ec, key_bits: 123}}
+    expect: *invalid
+  - id: ca-import-missing-pem
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/ca/invalid/import, body: {scope_name: compat-scope, role_name: compat-role}}
+    expect: *invalid
+  - id: ca-import-malformed-pem
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/ca/invalid/import, body: {ca_pem: not-a-pem-certificate, scope_name: compat-scope, role_name: compat-role}}
+    expect: *invalid
+  - id: listener-missing-ca-and-address
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/listener/invalid, body: {}}
+    expect: *invalid
+  - id: listener-missing-ca
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/listener/invalid, body: {address: '127.0.0.1:5696'}}
+    expect: *invalid
+  - id: listener-missing-address
+    depends: [ca-mount]
+    request: {method: POST, path: /v1/compat-kmip/listener/invalid, body: {ca: absent-ca}}
+    expect: *invalid
+  - id: ca-unmount
+    depends: [ca-mount]
+    request: {method: DELETE, path: /v1/sys/mounts/compat-kmip}
+    expect: {status: [200, 204]}
