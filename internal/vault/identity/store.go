@@ -99,6 +99,7 @@ func NewIdentityStore(ctx context.Context, identityStoreConfig *IdentityStoreCon
 		InitializeFunc: iStore.initialize,
 		PathsSpecial: &logical.Paths{
 			Unauthenticated: []string{
+				"scim/v2/ServiceProviderConfig",
 				"oidc/.well-known/*",
 				"oidc/provider/+/.well-known/*",
 				"oidc/provider/+/token",
@@ -110,7 +111,7 @@ func NewIdentityStore(ctx context.Context, identityStoreConfig *IdentityStoreCon
 		PeriodicFunc: func(ctx context.Context, req *logical.Request) error {
 			iStore.OidcPeriodicFunc(ctx)
 
-			return nil
+			return iStore.SCIMCleanup(ctx)
 		},
 		RunningVersion: versions.DefaultBuiltinVersion,
 	}
@@ -302,6 +303,7 @@ func (i *IdentityStore) paths() []*framework.Path {
 		oidcPaths(i),
 		oidcProviderPaths(i),
 		mfaPaths(i),
+		scimPaths(i),
 	)
 }
 

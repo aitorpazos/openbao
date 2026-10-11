@@ -88,6 +88,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 			},
 
 			Unauthenticated: []string{
+				"activation-flags",
 				"wrapping/lookup",
 				"wrapping/pubkey",
 				"replication/status",
@@ -134,6 +135,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	}
 
 	b.Paths = append(b.Paths, b.configPaths()...)
+	b.Paths = append(b.Paths, b.activationFlagPaths()...)
 	b.Paths = append(b.Paths, b.rekeyPaths()...)
 	b.Paths = append(b.Paths, b.rotatePaths()...)
 	b.Paths = append(b.Paths, b.generateRootPaths()...)
