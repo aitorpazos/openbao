@@ -1,0 +1,249 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-quotas-rate-limit-identity
+feature: identity-rate-quotas
+source: https://developer.hashicorp.com/vault/api-docs/system/rate-limit-quotas
+source_version: v2.x (latest)
+notes: >-
+  Sources: api-docs/system/rate-limit-quotas (the group_by and
+  secondary_rate parameters, both marked Enterprise, plus the response
+  sample showing group_by "ip" and secondary_rate 0) and
+  vault/docs/configuration/identity-based-rate-limit (the four modes and
+  the "cannot configure a rate limit quota for a specific entity" rule).
+  The fork implements the documented configuration surface: group_by
+  validation (ip/none/entity_then_ip/entity_then_none; empty → ip),
+  secondary_rate only allowed for the entity_then_* modes and defaulting
+  to rate when unset or zero. Enforcement is also implemented: requests
+  carrying an entity (resolved from the request token) bucket by entity
+  ID at the primary rate; requests without an entity bucket by IP
+  (entity_then_ip) or into a single shared bucket (entity_then_none) at
+  the secondary rate. The enforcement cases use a userpass login to
+  capture an entity-backed token (rate=1 per entity, secondary 1 for the
+  shared none bucket). Only one rate-limit quota may exist per scope, so
+  non-default cases use distinct mount paths (KV mount rlq-kv with path
+  suffixes) rather than the global scope.
+cases:
+  - id: mount-setup
+    request:
+      method: POST
+      path: /v1/sys/mounts/rlq-kv
+      body: {type: kv, options: {version: "2"}}
+    expect:
+      status: [200, 204, 400]
+  - id: create-default-group-by
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-default
+      body: {rate: 100}
+    expect:
+      status: [204, 400]
+  - id: read-default
+    request:
+      method: GET
+      path: /v1/sys/quotas/rate-limit/rlq-default
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [group_by]
+            properties:
+              group_by: {type: string}
+              secondary_rate: {type: number}
+      exact: {data.group_by: ip}
+  - id: create-none-mode
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-none
+      body: {rate: 100, group_by: none, path: rlq-kv/data/a}
+    expect:
+      status: [204]
+  - id: read-none-mode
+    request:
+      method: GET
+      path: /v1/sys/quotas/rate-limit/rlq-none
+    expect:
+      status: [200]
+      exact: {data.group_by: none, data.secondary_rate: 0}
+  - id: create-invalid-group-by
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-bad-mode
+      body: {rate: 100, group_by: bogus}
+    expect:
+      status: [400]
+      errors_contain: ["invalid group_by"]
+  - id: create-secondary-with-ip-rejected
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-sec-ip
+      body: {rate: 100, group_by: ip, secondary_rate: 5}
+    expect:
+      status: [400]
+      errors_contain: ["secondary_rate requires entity_then_ip or entity_then_none"]
+  - id: create-entity-ip-defaults-secondary
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-ent-ip
+      body: {rate: 10, group_by: entity_then_ip, path: rlq-kv/data/b}
+    expect:
+      status: [204]
+  - id: read-entity-ip
+    request:
+      method: GET
+      path: /v1/sys/quotas/rate-limit/rlq-ent-ip
+    expect:
+      status: [200]
+      exact: {data.group_by: entity_then_ip, data.secondary_rate: 10}
+  - id: create-entity-none-explicit-secondary
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-ent-none
+      body: {rate: 10, group_by: entity_then_none, secondary_rate: 20, path: rlq-kv/data/c}
+    expect:
+      status: [204]
+  - id: read-entity-none
+    request:
+      method: GET
+      path: /v1/sys/quotas/rate-limit/rlq-ent-none
+    expect:
+      status: [200]
+      exact: {data.group_by: entity_then_none, data.secondary_rate: 20}
+  - id: update-reset-secondary-to-rate
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-ent-none
+      body: {rate: 5, group_by: entity_then_none, path: rlq-kv/data/c}
+    expect:
+      status: [204]
+  - id: read-after-update
+    request:
+      method: GET
+      path: /v1/sys/quotas/rate-limit/rlq-ent-none
+    expect:
+      status: [200]
+      exact: {data.rate: 5, data.secondary_rate: 5}
+  - id: create-secondary-negative-rejected
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-neg
+      body: {rate: 10, group_by: entity_then_none, secondary_rate: -1}
+    expect:
+      status: [400]
+      errors_contain: ["secondary_rate"]
+  - id: enforcement-userpass-enable
+    request:
+      method: POST
+      path: /v1/sys/auth/userpass
+      body: {type: userpass}
+    expect:
+      status: [200, 204, 400]
+  - id: enforcement-policy
+    request:
+      method: PUT
+      path: /v1/sys/policies/acl/rlq-pol
+      body: {policy: "path \"rlq-kv/data/enforce\" { capabilities = [\"read\"] }"}
+    expect:
+      status: [204]
+  - id: enforcement-user
+    request:
+      method: POST
+      path: /v1/auth/userpass/users/rlq-user
+      body: {password: p, token_policies: rlq-pol}
+    expect:
+      status: [204, 400]
+  - id: enforcement-login
+    request:
+      method: POST
+      path: /v1/auth/userpass/login/rlq-user
+      body: {password: p}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [auth]
+        properties:
+          auth:
+            type: object
+            required: [client_token, entity_id]
+            properties:
+              client_token: {type: string}
+              entity_id: {type: string}
+    capture:
+      token: auth.client_token
+      ent: auth.entity_id
+  - id: enforcement-quota
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/rlq-enforce
+      body: {rate: 1, interval: 5, group_by: entity_then_none, path: rlq-kv/data/enforce}
+    expect:
+      status: [204]
+  - id: enforcement-first-read-allowed
+    request:
+      method: GET
+      path: /v1/rlq-kv/data/enforce
+    use_captured_token: true
+    expect:
+      status: [404]
+  - id: enforcement-second-read-limited
+    request:
+      method: GET
+      path: /v1/rlq-kv/data/enforce
+    use_captured_token: true
+    expect:
+      status: [429]
+  - id: enforcement-third-read-limited
+    request:
+      method: GET
+      path: /v1/rlq-kv/data/enforce
+    use_captured_token: true
+    expect:
+      status: [429]
+  - id: enforcement-root-read-falls-to-secondary
+    # The root token carries no entity, so its request falls into the
+    # shared none bucket at the secondary rate — separate from the
+    # exhausted entity bucket above.
+    request:
+      method: GET
+      path: /v1/rlq-kv/data/enforce
+    expect:
+      status: [404]
+  - id: cleanup-policy
+    request:
+      method: DELETE
+      path: /v1/sys/policies/acl/rlq-pol
+    expect:
+      status: [204]
+  - id: cleanup-quota
+    request:
+      method: DELETE
+      path: /v1/sys/quotas/rate-limit/rlq-enforce
+    expect:
+      status: [204]
+  - id: cleanup-default
+    request:
+      method: DELETE
+      path: /v1/sys/quotas/rate-limit/rlq-default
+    expect:
+      status: [204]
+  - id: cleanup-none
+    request:
+      method: DELETE
+      path: /v1/sys/quotas/rate-limit/rlq-none
+    expect:
+      status: [204]
+  - id: cleanup-ent-ip
+    request:
+      method: DELETE
+      path: /v1/sys/quotas/rate-limit/rlq-ent-ip
+    expect:
+      status: [204]
+  - id: cleanup-ent-none
+    request:
+      method: DELETE
+      path: /v1/sys/quotas/rate-limit/rlq-ent-none
+    expect:
+      status: [204]

@@ -62,9 +62,9 @@ import (
 	ident "github.com/openbao/openbao/v2/internal/vault/identity"
 	"github.com/openbao/openbao/v2/internal/vault/policy"
 	"github.com/openbao/openbao/v2/internal/vault/quotas"
-	"github.com/openbao/openbao/v2/internal/vault/sentinel"
 	"github.com/openbao/openbao/v2/internal/vault/routing"
 	vaultseal "github.com/openbao/openbao/v2/internal/vault/seal"
+	"github.com/openbao/openbao/v2/internal/vault/sentinel"
 	"github.com/openbao/openbao/v2/internal/version"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -479,11 +479,11 @@ type Core struct {
 
 	// replicationState keeps the current replication state cached for quick
 	// lookup; activeNodeReplicationState stores the active value on standbys
-	replicationState           atomic.Uint32
+	replicationState atomic.Uint32
 	// replicationStateMut serializes replication state transitions
 	// within request handlers (the request pipeline already holds
 	// c.stateLock.RLock, so handlers must not acquire it themselves).
-	replicationStateMut sync.Mutex
+	replicationStateMut        sync.Mutex
 	activeNodeReplicationState atomic.Uint32
 
 	// uiConfig contains UI configuration
@@ -3082,6 +3082,33 @@ func (c *Core) ApplyRateLimitQuota(ctx context.Context, req *quotas.Request) (qu
 	}
 
 	return resp, nil
+}
+
+// HasEntityGroupingRateQuota reports whether any configured rate-limit quota
+// groups requests by identity entity (group_by entity_then_ip or
+// entity_then_none). Callers use it to decide whether to resolve the
+// request token's entity before applying the quota.
+func (c *Core) HasEntityGroupingRateQuota() bool {
+	if c.quotaManager == nil {
+		return false
+	}
+	has, err := c.quotaManager.EntityGroupingRateQuotas()
+	return err == nil && has
+}
+
+// RateLimitEntityIDForToken resolves the identity entity of a token for
+// identity-based rate-limit grouping. Returns an empty string when the token
+// is unknown or not connected to an entity, which makes the request fall
+// back to the documented IP/none groupings.
+func (c *Core) RateLimitEntityIDForToken(ctx context.Context, token string) string {
+	if token == "" || c.tokenStore == nil {
+		return ""
+	}
+	te, err := c.tokenStore.Lookup(ctx, token)
+	if err != nil || te == nil {
+		return ""
+	}
+	return te.EntityID
 }
 
 // RateLimitAuditLoggingEnabled returns if the quota configuration allows audit

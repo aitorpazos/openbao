@@ -74,6 +74,10 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/helper/random/random_api.go` | +`drbg` parameter (auto/hmacdrbg → seed from the chosen source, generate via HMAC-DRBG); caps split per docs: 10MB for platform/DRBG, 128KB for seal/all (was a global 128KB) | Documented Generate-random-bytes contract (api-docs/system/tools, v2.x (latest)); seal/all keep the pre-existing degradation to platform sampling with the seal warning | — |
 | `internal/vault/logical_system.go` | password-policy create/update: `entropy_source` parameter ("", platform, seal) — seal rejected with 400 ("entropy_source \"seal\" requires entropy augmentation which is not available"); stored on the policy and echoed by read (omitted when empty, matching the docs read sample) | Documented `entropy_source` parameter of the password-policy API (api-docs/system/policies-password, v2.x (latest)); generation itself always uses the platform source on the fork (the only honorable source) | — |
 | `internal/vault/logical_system_paths.go` | +`drbg` field on the `tools/random` path schema | Same as above (the field must exist in the schema for body-form delivery) | — |
+| `internal/vault/quotas/quotas.go` | +`EntityID` on the quota Request; +`Manager.EntityGroupingRateQuotas()` flag | Documented identity-based rate-limit quotas (api-docs/system/rate-limit-quotas + guide): group_by entity_then_ip/entity_then_none bucket requests by entity | — |
+| `internal/vault/quotas/quotas_rate_limit.go` | +entity-grouped admission: entity buckets take `rate`, IP (entity_then_ip) / shared-none (entity_then_none) buckets take `secondary_rate` (second limiter store created at initialize) | Same as above; group_by `none` puts all requests in one bucket at the primary rate | — |
+| `internal/vault/core.go` | +`HasEntityGroupingRateQuota()` and `RateLimitEntityIDForToken()` helpers | Same as above; the entity is resolved from the request token only when an entity-grouped quota exists | — |
+| `internal/http/util.go` | Resolve the request token's entity before applying a rate-limit quota when entity grouping is configured (namespace-injected context; getTokenFromReq's second return means Bearer-sourced, not token-found) | Same as above; unauthenticated/entity-less requests fall to the documented IP/none groupings | — |
 | `internal/vault/identity/mfa.go` | +`ValidateMFASelfEnrollment` (pop+re-push pending under queue lock, namespace/entity binding) + `enable_self_enrollment` on config create/read | Self-enrollment semantics: enrollment must not consume the pending login; non-entity tokens rejected | — |
 | `internal/vault/login_mfa.go` | +`enable_self_enrollment` persisted on login MFA TOTP method config (create/update/read) | Operator-visible knob enabling self-enrollment per method | — |
 | `internal/vault/logical_system_raft.go` | `raftStoragePaths()` prepends `b.snapshotLoadPaths()` (return append pattern) | Registers `/sys/storage/raft/snapshot-load` (POST/LIST/GET/DELETE) + `/sys/storage/raft/snapshot-auto/snapshot-load/:name` when raft storage is in use | — |
@@ -346,6 +350,16 @@ Core seams (ledger rows above):
   explicit 400 refusal for seal (entropy augmentation needs an HSM-backed
   seal); specs/entropy/10-password-policies.yaml (8 cases) covers default
   omission, platform echo, seal/invalid rejection and generation.
+- Identity-based rate-limit quotas (compat-control-group branch): the
+  configuration surface was already implemented (fields + validation +
+  readback); this lane implemented the ENFORCEMENT — requests carrying an
+  entity bucket by entity ID at `rate`; entity-less requests bucket by IP
+  (entity_then_ip) or share a single bucket (entity_then_none) at
+  `secondary_rate`. specs/quotas/rate-limit-identity.yaml (29 cases) covers
+  validation, readback, defaults and live 429 enforcement. Pitfall found:
+  tokenStore.Lookup requires a namespace in the context — the quota handler
+  resolves the namespace before applying quotas, so the lookup reuses that
+  context.
   (the transit docs do not document drbg; transit gets it via the shared
   helper but no schema field → inert).
 - Entropy augmentation's config-file stanza (entropy "seal") is a server

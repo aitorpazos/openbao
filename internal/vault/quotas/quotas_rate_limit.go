@@ -83,6 +83,7 @@ type RateLimitQuota struct {
 
 	lock                *sync.RWMutex
 	store               limiter.Store
+	secondaryStore      limiter.Store
 	logger              log.Logger
 	metricSink          *metricsutil.ClusterMetricSink
 	purgeInterval       time.Duration
@@ -211,6 +212,29 @@ func (rlq *RateLimitQuota) initialize(logger log.Logger, ms *metricsutil.Cluster
 	}
 
 	rlq.store = rlStore
+
+	// Entity-grouped quotas need a second limiter with the secondary rate:
+	// buckets grouped by IP (entity_then_ip) or the shared "none" bucket
+	// (entity_then_none) take secondary_rate, while entity buckets take
+	// rate. For plain ip/none groupings the primary store already carries
+	// the effective rate, so no secondary store is created.
+	if rlq.GroupBy == "entity_then_ip" || rlq.GroupBy == "entity_then_none" {
+		secondaryRate := rlq.SecondaryRate
+		if secondaryRate <= 0 {
+			secondaryRate = rlq.Rate
+		}
+		secStore, err := memorystore.New(&memorystore.Config{
+			Tokens:        uint64(math.Round(secondaryRate)),
+			Interval:      rlq.Interval,
+			SweepInterval: rlq.purgeInterval,
+			SweepMinTTL:   rlq.staleAge,
+		})
+		if err != nil {
+			return err
+		}
+		rlq.secondaryStore = secStore
+	}
+
 	rlq.blockedClients = sync.Map{}
 
 	if rlq.BlockInterval > 0 && !rlq.purgeBlocked {
@@ -314,16 +338,55 @@ func (rlq *RateLimitQuota) allow(ctx context.Context, req *Request) (Response, e
 		}
 	}()
 
+	// Bucket key and rate selection per the documented group_by modes:
+	//   ip               — one bucket per source address, primary rate
+	//   none             — a single shared bucket, primary rate
+	//   entity_then_ip   — entity ID bucket when the request carries an
+	//                      entity, otherwise one bucket per source address
+	//                      with the secondary rate
+	//   entity_then_none — entity ID bucket when the request carries an
+	//                      entity, otherwise a single shared bucket with
+	//                      the secondary rate
+	// Requests without a resolvable entity fall back to the secondary rate,
+	// per the docs ("unauthenticated requests, and requests with
+	// authentication that is not connected to an entity").
+	bucketKey := req.ClientAddress
+	useSecondary := false
+	switch rlq.GroupBy {
+	case "none":
+		bucketKey = "none"
+	case "entity_then_ip":
+		if req.EntityID != "" {
+			bucketKey = req.EntityID
+		} else {
+			useSecondary = true
+		}
+	case "entity_then_none":
+		if req.EntityID != "" {
+			bucketKey = req.EntityID
+		} else {
+			bucketKey = "none"
+			useSecondary = true
+		}
+	}
+	store := rlq.store
+	if useSecondary {
+		if rlq.secondaryStore == nil {
+			return resp, errors.New("entity-grouped quota missing secondary limiter")
+		}
+		store = rlq.secondaryStore
+	}
+
 	// Check if the client is currently blocked and if so, deny the request. Note,
 	// we cannot simply rely on the presence of the client in the map as the timing
 	// of purging blocked clients may not yield a false negative. In other words,
 	// a client may no longer be considered blocked whereas the purging interval
 	// has yet to run.
-	if v, ok := rlq.blockedClients.Load(req.ClientAddress); ok {
+	if v, ok := rlq.blockedClients.Load(bucketKey); ok {
 		blockedAt := v.(time.Time)
 		if time.Since(blockedAt) >= rlq.BlockInterval {
 			// allow the request and remove the blocked client
-			rlq.blockedClients.Delete(req.ClientAddress)
+			rlq.blockedClients.Delete(bucketKey)
 		} else {
 			// deny the request and return early
 			resp.Allowed = false
@@ -332,7 +395,7 @@ func (rlq *RateLimitQuota) allow(ctx context.Context, req *Request) (Response, e
 		}
 	}
 
-	limit, remaining, reset, allow, err := rlq.store.Take(ctx, req.ClientAddress)
+	limit, remaining, reset, allow, err := store.Take(ctx, bucketKey)
 	if err != nil {
 		return resp, err
 	}
@@ -348,7 +411,7 @@ func (rlq *RateLimitQuota) allow(ctx context.Context, req *Request) (Response, e
 	if !resp.Allowed && rlq.purgeBlocked {
 		blockedAt := time.Now()
 		retryAfter = strconv.Itoa(int(time.Until(blockedAt.Add(rlq.BlockInterval)).Seconds()))
-		rlq.blockedClients.Store(req.ClientAddress, blockedAt)
+		rlq.blockedClients.Store(bucketKey, blockedAt)
 	}
 
 	return resp, nil

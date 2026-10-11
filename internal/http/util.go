@@ -165,6 +165,17 @@ func rateLimitQuotaWrapping(handler http.Handler, core *vault.Core) http.Handler
 			ClientAddress: parseRemoteIPAddress(r),
 		}
 
+		// Identity-based rate-limit quotas group requests by entity. Only
+		// resolve the token's entity when at least one configured rate-limit
+		// quota uses an entity group_by mode, to keep the common path cheap.
+		// Note getTokenFromReq's second return value indicates the token was
+		// sourced from a Bearer header, not that a token exists.
+		if core.HasEntityGroupingRateQuota() {
+			if token, _ := getTokenFromReq(r); token != "" {
+				quotaReq.EntityID = core.RateLimitEntityIDForToken(ctx, token)
+			}
+		}
+
 		// This checks if any role based quota is required (LCQ or RLQ).
 		requiresResolveRole, err := core.ResolveRoleForQuotas(quotaReq)
 		if err != nil {

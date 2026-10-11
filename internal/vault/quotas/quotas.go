@@ -271,6 +271,11 @@ type Request struct {
 	// ClientAddress is client unique addressable string (e.g. IP address). It can
 	// be empty if the quota type does not need it.
 	ClientAddress string
+
+	// EntityID is the identity entity associated with the request's token,
+	// if any. It is used by identity-based rate-limit quotas (group_by
+	// entity_then_ip / entity_then_none) to bucket requests by entity.
+	EntityID string
 }
 
 // NewManager creates and initializes a new quota manager to hold all the quota
@@ -375,6 +380,31 @@ func (m *Manager) quotaNamesLocked(qType Type) ([]string, error) {
 		names = append(names, raw.(Quota).QuotaName())
 	}
 	return names, nil
+}
+
+// EntityGroupingRateQuotas reports whether any rate-limit quota is
+// configured with an entity-based group_by mode. Callers use it to decide
+// whether the (relatively expensive) token/entity resolution is worth doing
+// before applying a rate-limit quota to a request.
+func (m *Manager) EntityGroupingRateQuotas() (bool, error) {
+	m.dbAndCacheLock.RLock()
+	defer m.dbAndCacheLock.RUnlock()
+
+	txn := m.db.Txn(false)
+	iter, err := txn.Get(TypeRateLimit.String(), indexID)
+	if err != nil {
+		return false, err
+	}
+	for raw := iter.Next(); raw != nil; raw = iter.Next() {
+		rlq, ok := raw.(Quota).(*RateLimitQuota)
+		if !ok {
+			continue
+		}
+		if rlq.GroupBy == "entity_then_ip" || rlq.GroupBy == "entity_then_none" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // QuotaByID queries for a quota rule in the db for a given quota ID
