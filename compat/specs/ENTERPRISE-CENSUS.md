@@ -1,5 +1,43 @@
 # Vault Enterprise operator API census
 
+## Status addendum (2026-10-12, post-census implementation)
+
+All **High**-priority gaps in section 1 have since been spec'd and implemented
+on the compat-harness branch: control-group settings, cross-namespace
+group-policy application, UI custom messages, default login auth, managed
+keys, the keymgmt engine, identity-based rate limits, rotation orphans,
+license status/utilization/counters, audit filtering, SAML + SCEP auth, OS
+local accounts, PKI certificate metadata/export-key management, CIEPS/EST/
+CMPv2/SCEP issuance configuration, the pki-external-ca engine, transit
+Enterprise cryptography (CMAC/CBC/ml-dsa/hybrid/Ed25519ctx-ph; SLH-DSA
+deferred — no in-tree FIPS 205 implementation), plugin workload identity
+(OIDC plugin/sync discovery + JWKS), provider credential rotation config
+(LDAP auth + secrets, database rootless/static-role fields, AWS/Azure/GCP
+auth + secrets config engines — config-only with explicit remote-operation
+rejection), sealwrap/rewrap + seal-backend-status, autopilot
+disable_upgrade_migration, and internal-UI namespace listing.
+
+Also added: specs for the DR operation-token ceremony route/schema surface
+(implementation belongs to the replication agent's lane; 9 cases remain
+FEATURE_ABSENT pending those routes).
+
+Live full-suite state on an in-memory dev server (compat-harness,
+commit 77df0bf + this addendum's branches): **889 PASS / 37 FEATURE_ABSENT /
+17 FAIL / 3 SKIP**. The 17 FAILs decompose as: 13 SCIM fixture-contract cases
+(clear when run with the documented SCIM-actor token — verified 20/20; the
+suite's shared token cannot be the registered actor), 3 audit cases requiring
+the `unsafe-allow-api-audit-creation` dev flag, and 1 documented
+asynchronous namespace-deletion fixture race (direct retry succeeds).
+FEATURE_ABSENT decomposes as: raft-integrated-storage prerequisites
+(autosnapshot 16, snapshot-load 5, autopilot config 6, redundancy state 1)
+and the 9 DR operation-token routes. SLH-DSA create (1 FAIL) is a documented
+clean-room deferral, not a spec error.
+
+Remaining documented-deferral families (Medium priority per the census):
+KMIP listener/CA/client fixtures, performance-standby/consistency
+integration, transform tokenization external stores, secrets-sync provider
+execution, positive identity/SCIM/SPIFFE fixtures requiring live providers.
+
 ## Scope, evidence, and interpretation
 
 - **Snapshot:** public documentation fetched 2026-10-11; local inventory inspected on the same date. This is a census of the **current, unversioned documentation**, not every historical Vault release.
