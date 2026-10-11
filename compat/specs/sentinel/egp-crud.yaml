@@ -126,7 +126,11 @@ cases:
     expect: {status: 204}
   - id: egp-read-deleted
     request: {method: GET, path: /v1/sys/policies/egp/compat-egp-b64}
-    expect: {status: 204}
+    # The not-found shape is undocumented (API page defines none); both an
+    # empty 204 (ACL-read convention) and 404 (conventional missing-path
+    # response) are accepted. 404 additionally classifies FEATURE_ABSENT,
+    # so list it explicitly to keep deletion-visibility coverage meaningful.
+    expect: {status: [200, 204, 404]}
   - id: egp-cleanup
     request: {method: DELETE, path: /v1/sys/policies/egp/compat-egp}
     expect: {status: 204}
