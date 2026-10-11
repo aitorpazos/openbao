@@ -1,0 +1,175 @@
+# SPDX-License-Identifier: MPL-2.0
+api: plugin-workload-identity-and-sync-discovery
+feature: plugin-rotation-seal
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/tokens
+source_version: "v2.x (latest)"
+notes: |
+  Additional sources (all v2.x (latest)): https://developer.hashicorp.com/vault/api-docs/auth/aws,
+  https://developer.hashicorp.com/vault/api-docs/auth/azure, https://developer.hashicorp.com/vault/api-docs/auth/gcp,
+  https://developer.hashicorp.com/vault/api-docs/secret/aws, https://developer.hashicorp.com/vault/api-docs/secret/azure,
+  https://developer.hashicorp.com/vault/api-docs/secret/gcp. Mount lifecycle: /vault/api-docs/system/auth
+  and /vault/api-docs/system/mounts on the same documentation host; errors: /vault/api-docs#http-status-codes.
+  Disposable administrative target; auth/compat-pwi-* and compat-pwi-* MUST be absent initially.
+  No login, token exchange or credential issuance. Dummy identities; block outbound networking.
+  All TTLs are config values, not decoded JWTs; cloud-backed execution needs external fixtures.
+  Discovery responses are unwrapped JSON, not data envelopes. Do not pin deployment-specific issuers.
+  Plugin JWKS uses the URI in the discovery sample; the later JWKS curl sample inconsistently omits /plugins.
+  Unknown field rejection is NOT documented: readback catches silently ignored Enterprise fields instead.
+  Independent negative tests depend only on mounts; cleanup is unconditional. See notes.md for fixtures.
+cases:
+  - id: plugins-discovery
+    no_auth: true
+    request: {method: GET, path: /v1/identity/oidc/plugins/.well-known/openid-configuration, headers: {X-Vault-Token: ''}}
+    expect: &discovery
+      status: 200
+      body_schema:
+        type: object
+        required: [issuer, jwks_uri, response_types_supported, subject_types_supported, id_token_signing_alg_values_supported]
+        properties:
+          issuer: {type: string}
+          jwks_uri: {type: string}
+          response_types_supported: {type: array, items: {type: string}}
+          subject_types_supported: {type: array, items: {type: string}}
+          id_token_signing_alg_values_supported: {type: array, items: {type: string}}
+      contains: {response_types_supported: [id_token], subject_types_supported: [public], id_token_signing_alg_values_supported: [RS256, RS384, RS512, ES256, ES384, ES512, EdDSA]}
+  - id: plugins-jwks
+    no_auth: true
+    request: {method: GET, path: /v1/identity/oidc/plugins/.well-known/keys, headers: {X-Vault-Token: ''}}
+    expect: &jwks
+      status: 200
+      body_schema:
+        type: object
+        required: [keys]
+        properties:
+          keys:
+            type: array
+            items:
+              type: object
+              required: [kty, kid, use, alg]
+              properties: {kty: {type: string}, kid: {type: string}, use: {type: string}, alg: {type: string}}
+  - id: sync-discovery
+    no_auth: true
+    request: {method: GET, path: /v1/identity/oidc/secrets-sync/.well-known/openid-configuration, headers: {X-Vault-Token: ''}}
+    expect: *discovery
+  - id: sync-jwks
+    no_auth: true
+    request: {method: GET, path: /v1/identity/oidc/secrets-sync/.well-known/keys, headers: {X-Vault-Token: ''}}
+    expect: *jwks
+  - id: aws-auth-mount
+    request: {method: POST, path: /v1/sys/auth/compat-pwi-aws, body: {type: aws}}
+    expect: &written {status: [200, 204]}
+  - id: aws-auth-exclusive
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pwi-aws/config/client, body: {access_key: compat-dummy, secret_key: compat-dummy, identity_token_audience: compat-audience, role_arn: 'arn:aws:iam::000000000000:role/compat'}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: aws-auth-missing-role
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pwi-aws/config/client, body: {access_key: '', secret_key: '', role_arn: '', identity_token_audience: compat-audience}}
+    expect: *invalid
+  - id: aws-auth-write
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pwi-aws/config/client, body: &aws-wif {access_key: '', secret_key: '', identity_token_audience: compat-audience, identity_token_ttl: 600, role_arn: 'arn:aws:iam::000000000000:role/compat'}}
+    expect: *written
+  - id: aws-auth-read
+    depends: [aws-auth-write]
+    request: {method: GET, path: /v1/auth/compat-pwi-aws/config/client}
+    expect: &aws-read {status: 200, exact: {data.identity_token_audience: compat-audience, data.identity_token_ttl: 600, data.role_arn: 'arn:aws:iam::000000000000:role/compat'}}
+  - id: aws-secret-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pwi-aws, body: {type: aws}}
+    expect: *written
+  - id: aws-secret-exclusive
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pwi-aws/config/root, body: {access_key: compat-dummy, secret_key: compat-dummy, identity_token_audience: compat-audience, role_arn: 'arn:aws:iam::000000000000:role/compat'}}
+    expect: *invalid
+  - id: aws-secret-missing-role
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pwi-aws/config/root, body: {access_key: '', secret_key: '', role_arn: '', identity_token_audience: compat-audience}}
+    expect: *invalid
+  - id: aws-secret-write
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pwi-aws/config/root, body: *aws-wif}
+    expect: *written
+  - id: aws-secret-read
+    depends: [aws-secret-write]
+    request: {method: GET, path: /v1/compat-pwi-aws/config/root}
+    expect: *aws-read
+  - id: azure-auth-mount
+    request: {method: POST, path: /v1/sys/auth/compat-pwi-azure, body: {type: azure}}
+    expect: *written
+  - id: azure-auth-exclusive
+    depends: [azure-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pwi-azure/config, body: {tenant_id: '00000000-0000-0000-0000-000000000001', resource: 'https://management.azure.com/', client_id: '00000000-0000-0000-0000-000000000002', client_secret: compat-dummy, identity_token_audience: compat-audience}}
+    expect: *invalid
+  - id: azure-auth-write
+    depends: [azure-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pwi-azure/config, body: &azure-wif {tenant_id: '00000000-0000-0000-0000-000000000001', resource: 'https://management.azure.com/', client_id: '00000000-0000-0000-0000-000000000002', client_secret: '', identity_token_audience: compat-audience, identity_token_ttl: 600}}
+    expect: *written
+  - id: azure-auth-read
+    depends: [azure-auth-write]
+    request: {method: GET, path: /v1/auth/compat-pwi-azure/config}
+    expect: &azure-read {status: 200, exact: {data.identity_token_audience: compat-audience, data.identity_token_ttl: 600, data.client_id: '00000000-0000-0000-0000-000000000002'}}
+  - id: azure-secret-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pwi-azure, body: {type: azure}}
+    expect: *written
+  - id: azure-secret-exclusive
+    depends: [azure-secret-mount]
+    request: {method: POST, path: /v1/compat-pwi-azure/config, body: {tenant_id: '00000000-0000-0000-0000-000000000001', subscription_id: '00000000-0000-0000-0000-000000000003', client_id: '00000000-0000-0000-0000-000000000002', client_secret: compat-dummy, identity_token_audience: compat-audience}}
+    expect: *invalid
+  - id: azure-secret-write
+    depends: [azure-secret-mount]
+    request: {method: POST, path: /v1/compat-pwi-azure/config, body: {tenant_id: '00000000-0000-0000-0000-000000000001', subscription_id: '00000000-0000-0000-0000-000000000003', client_id: '00000000-0000-0000-0000-000000000002', client_secret: '', identity_token_audience: compat-audience, identity_token_ttl: 600}}
+    expect: *written
+  - id: azure-secret-read
+    depends: [azure-secret-write]
+    request: {method: GET, path: /v1/compat-pwi-azure/config}
+    expect: *azure-read
+  - id: gcp-auth-mount
+    request: {method: POST, path: /v1/sys/auth/compat-pwi-gcp, body: {type: gcp}}
+    expect: *written
+  - id: gcp-auth-missing-service-account
+    depends: [gcp-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pwi-gcp/config, body: {credentials: '', identity_token_audience: compat-audience, service_account_email: ''}}
+    expect: *invalid
+  - id: gcp-auth-write
+    depends: [gcp-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pwi-gcp/config, body: &gcp-wif {credentials: '', identity_token_audience: compat-audience, identity_token_ttl: 600, service_account_email: compat@compat-project.iam.gserviceaccount.com}}
+    expect: *written
+  - id: gcp-auth-read
+    depends: [gcp-auth-write]
+    request: {method: GET, path: /v1/auth/compat-pwi-gcp/config}
+    expect: &gcp-read {status: 200, exact: {data.identity_token_audience: compat-audience, data.identity_token_ttl: 600, data.service_account_email: compat@compat-project.iam.gserviceaccount.com}}
+  - id: gcp-secret-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pwi-gcp, body: {type: gcp}}
+    expect: *written
+  - id: gcp-secret-missing-service-account
+    depends: [gcp-secret-mount]
+    request: {method: POST, path: /v1/compat-pwi-gcp/config, body: {credentials: '', identity_token_audience: compat-audience, service_account_email: ''}}
+    expect: *invalid
+  - id: gcp-secret-write
+    depends: [gcp-secret-mount]
+    request: {method: POST, path: /v1/compat-pwi-gcp/config, body: *gcp-wif}
+    expect: *written
+  - id: gcp-secret-read
+    depends: [gcp-secret-write]
+    request: {method: GET, path: /v1/compat-pwi-gcp/config}
+    expect: *gcp-read
+  - id: aws-auth-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-pwi-aws}
+    expect: *written
+  - id: aws-secret-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pwi-aws}
+    expect: *written
+  - id: azure-auth-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-pwi-azure}
+    expect: *written
+  - id: azure-secret-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pwi-azure}
+    expect: *written
+  - id: gcp-auth-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-pwi-gcp}
+    expect: *written
+  - id: gcp-secret-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pwi-gcp}
+    expect: *written

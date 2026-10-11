@@ -1,0 +1,379 @@
+# SPDX-License-Identifier: MPL-2.0
+api: provider-rotation-ldap-and-database-extensions
+feature: plugin-rotation-seal
+source: https://developer.hashicorp.com/vault/api-docs/auth/ldap
+source_version: "v2.x (latest)"
+notes: |
+  All sources v2.x (latest): primary covers LDAP AUTH rotation_url and root scheduling only.
+  Self-managed LDAP, rotation_policy, static-migration and stop are SECRET engine APIs:
+  https://developer.hashicorp.com/vault/api-docs/secret/ldap.
+  Named rotation-policy fixture: https://developer.hashicorp.com/vault/api-docs/system/policies-rotation.
+  compat-pr-policy MUST also be initially absent; it is deleted after the LDAP mount.
+  Database: https://developer.hashicorp.com/vault/api-docs/secret/databases and
+  https://developer.hashicorp.com/vault/api-docs/secret/databases/postgresql.
+  Cloud configuration: https://developer.hashicorp.com/vault/api-docs/auth/aws,
+  https://developer.hashicorp.com/vault/api-docs/auth/azure, https://developer.hashicorp.com/vault/api-docs/auth/gcp,
+  https://developer.hashicorp.com/vault/api-docs/secret/aws, https://developer.hashicorp.com/vault/api-docs/secret/azure,
+  https://developer.hashicorp.com/vault/api-docs/secret/gcp.
+  Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/auth and
+  https://developer.hashicorp.com/vault/api-docs/system/mounts; errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes.
+  Disposable admin target. All auth/compat-pr-* and compat-pr-* mounts MUST be initially absent.
+  Dummy credentials and closed loopback services; block outbound traffic. No rotate-root or rotate-role.
+  Automated cloud/root rotation stays disabled. Static roles have one-day periods and skip import rotation.
+  LDAP self-managed config creation has no bindpass; conflicting bindpass is tested on a separate mount.
+  Migration checks use an EMPTY mount, not an in-flight real LDAP migration. See notes.md for fixture gates.
+  Unknown field rejection is not promised by these docs and is deliberately not asserted. Writes alone
+  are not proof of field support; readback checks detect silently ignored configuration fields.
+cases:
+  - id: ldap-auth-mount
+    request: {method: POST, path: /v1/sys/auth/compat-pr-ldap, body: {type: ldap}}
+    expect: &written {status: [200, 204]}
+  - id: ldap-auth-write
+    depends: [ldap-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-ldap/config, body: {url: 'ldap://127.0.0.1:1', rotation_url: 'ldap://127.0.0.1:2', binddn: 'cn=compat,dc=example,dc=invalid', bindpass: compat-dummy, rotation_schedule: '0 0 * * SAT', rotation_window: 3600, disable_automated_rotation: true}}
+    expect: *written
+  - id: ldap-auth-read
+    depends: [ldap-auth-write]
+    request: {method: GET, path: /v1/auth/compat-pr-ldap/config}
+    expect: {status: 200, exact: {data.rotation_url: 'ldap://127.0.0.1:2', data.rotation_schedule: '0 0 * * SAT', data.rotation_window: 3600, data.disable_automated_rotation: true}}
+  - id: ldap-auth-exclusive
+    depends: [ldap-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-ldap/config, body: {url: 'ldap://127.0.0.1:1', rotation_period: 86400, rotation_schedule: '0 0 * * SAT', rotation_window: 0, disable_automated_rotation: true}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: aws-auth-mount
+    request: {method: POST, path: /v1/sys/auth/compat-pr-aws, body: {type: aws}}
+    expect: *written
+  - id: aws-auth-write
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-aws/config/client, body: &aws-schedule {access_key: compat-dummy, secret_key: compat-dummy, rotation_schedule: '0 0 * * SAT', rotation_window: 3600, disable_automated_rotation: true}}
+    expect: *written
+  - id: aws-auth-read
+    depends: [aws-auth-write]
+    request: {method: GET, path: /v1/auth/compat-pr-aws/config/client}
+    expect: &schedule-read {status: 200, exact: {data.rotation_schedule: '0 0 * * SAT', data.rotation_window: 3600, data.disable_automated_rotation: true}}
+  - id: aws-auth-exclusive
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-aws/config/client, body: {<<: *aws-schedule, rotation_period: 86400, rotation_window: 0}}
+    expect: *invalid
+  - id: aws-auth-period-window
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-aws/config/client, body: {<<: *aws-schedule, rotation_schedule: '', rotation_period: 86400}}
+    expect: *invalid
+  - id: aws-auth-short-period
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-aws/config/client, body: {<<: *aws-schedule, rotation_schedule: '', rotation_period: 9, rotation_window: 0}}
+    expect: *invalid
+  - id: aws-auth-short-window
+    depends: [aws-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-aws/config/client, body: {<<: *aws-schedule, rotation_period: 0, rotation_window: 3599}}
+    expect: *invalid
+  - id: aws-secret-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pr-aws, body: {type: aws}}
+    expect: *written
+  - id: aws-secret-write
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-aws/config/root, body: *aws-schedule}
+    expect: *written
+  - id: aws-secret-read
+    depends: [aws-secret-write]
+    request: {method: GET, path: /v1/compat-pr-aws/config/root}
+    expect: *schedule-read
+  - id: aws-secret-exclusive
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-aws/config/root, body: {<<: *aws-schedule, rotation_period: 86400, rotation_window: 0}}
+    expect: *invalid
+  - id: aws-secret-period-window
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-aws/config/root, body: {<<: *aws-schedule, rotation_schedule: '', rotation_period: 86400}}
+    expect: *invalid
+  - id: aws-secret-short-period
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-aws/config/root, body: {<<: *aws-schedule, rotation_schedule: '', rotation_period: 9, rotation_window: 0}}
+    expect: *invalid
+  - id: aws-secret-short-window
+    depends: [aws-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-aws/config/root, body: {<<: *aws-schedule, rotation_period: 0, rotation_window: 3599}}
+    expect: *invalid
+  - id: azure-auth-mount
+    request: {method: POST, path: /v1/sys/auth/compat-pr-azure, body: {type: azure}}
+    expect: *written
+  - id: azure-auth-write
+    depends: [azure-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-azure/config, body: &azure-schedule {tenant_id: '00000000-0000-0000-0000-000000000001', resource: 'https://management.azure.com/', client_id: '00000000-0000-0000-0000-000000000002', client_secret: compat-dummy, rotation_schedule: '0 0 * * SAT', rotation_window: 3600, disable_automated_rotation: true}}
+    expect: *written
+  - id: azure-auth-read
+    depends: [azure-auth-write]
+    request: {method: GET, path: /v1/auth/compat-pr-azure/config}
+    expect: *schedule-read
+  - id: azure-auth-exclusive
+    depends: [azure-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-azure/config, body: {<<: *azure-schedule, rotation_period: 86400, rotation_window: 0}}
+    expect: *invalid
+  - id: azure-auth-period-window
+    depends: [azure-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-azure/config, body: {<<: *azure-schedule, rotation_schedule: '', rotation_period: 86400}}
+    expect: *invalid
+  - id: azure-auth-short-period
+    depends: [azure-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-azure/config, body: {<<: *azure-schedule, rotation_schedule: '', rotation_period: 9, rotation_window: 0}}
+    expect: *invalid
+  - id: azure-auth-short-window
+    depends: [azure-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-azure/config, body: {<<: *azure-schedule, rotation_period: 0, rotation_window: 3599}}
+    expect: *invalid
+  - id: azure-secret-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pr-azure, body: {type: azure}}
+    expect: *written
+  - id: azure-secret-write
+    depends: [azure-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-azure/config, body: &azure-secret-schedule {tenant_id: '00000000-0000-0000-0000-000000000001', subscription_id: '00000000-0000-0000-0000-000000000003', client_id: '00000000-0000-0000-0000-000000000002', client_secret: compat-dummy, rotation_schedule: '0 0 * * SAT', rotation_window: 3600, disable_automated_rotation: true}}
+    expect: *written
+  - id: azure-secret-read
+    depends: [azure-secret-write]
+    request: {method: GET, path: /v1/compat-pr-azure/config}
+    expect: *schedule-read
+  - id: azure-secret-exclusive
+    depends: [azure-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-azure/config, body: {<<: *azure-secret-schedule, rotation_period: 86400, rotation_window: 0}}
+    expect: *invalid
+  - id: azure-secret-period-window
+    depends: [azure-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-azure/config, body: {<<: *azure-secret-schedule, rotation_schedule: '', rotation_period: 86400}}
+    expect: *invalid
+  - id: azure-secret-short-period
+    depends: [azure-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-azure/config, body: {<<: *azure-secret-schedule, rotation_schedule: '', rotation_period: 9, rotation_window: 0}}
+    expect: *invalid
+  - id: azure-secret-short-window
+    depends: [azure-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-azure/config, body: {<<: *azure-secret-schedule, rotation_period: 0, rotation_window: 3599}}
+    expect: *invalid
+  - id: gcp-auth-mount
+    request: {method: POST, path: /v1/sys/auth/compat-pr-gcp, body: {type: gcp}}
+    expect: *written
+  - id: gcp-auth-write
+    depends: [gcp-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-gcp/config, body: &gcp-schedule {rotation_schedule: '0 0 * * SAT', rotation_window: 3600, disable_automated_rotation: true}}
+    expect: *written
+  - id: gcp-auth-read
+    depends: [gcp-auth-write]
+    request: {method: GET, path: /v1/auth/compat-pr-gcp/config}
+    expect: *schedule-read
+  - id: gcp-auth-exclusive
+    depends: [gcp-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_period: 86400, rotation_window: 0}}
+    expect: *invalid
+  - id: gcp-auth-period-window
+    depends: [gcp-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_schedule: '', rotation_period: 86400}}
+    expect: *invalid
+  - id: gcp-auth-short-period
+    depends: [gcp-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_schedule: '', rotation_period: 9, rotation_window: 0}}
+    expect: *invalid
+  - id: gcp-auth-short-window
+    depends: [gcp-auth-mount]
+    request: {method: POST, path: /v1/auth/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_period: 0, rotation_window: 3599}}
+    expect: *invalid
+  - id: gcp-secret-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pr-gcp, body: {type: gcp}}
+    expect: *written
+  - id: gcp-secret-write
+    depends: [gcp-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-gcp/config, body: *gcp-schedule}
+    expect: *written
+  - id: gcp-secret-read
+    depends: [gcp-secret-write]
+    request: {method: GET, path: /v1/compat-pr-gcp/config}
+    expect: *schedule-read
+  - id: gcp-secret-exclusive
+    depends: [gcp-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_period: 86400, rotation_window: 0}}
+    expect: *invalid
+  - id: gcp-secret-period-window
+    depends: [gcp-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_schedule: '', rotation_period: 86400}}
+    expect: *invalid
+  - id: gcp-secret-short-period
+    depends: [gcp-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_schedule: '', rotation_period: 9, rotation_window: 0}}
+    expect: *invalid
+  - id: gcp-secret-short-window
+    depends: [gcp-secret-mount]
+    request: {method: POST, path: /v1/compat-pr-gcp/config, body: {<<: *gcp-schedule, rotation_period: 0, rotation_window: 3599}}
+    expect: *invalid
+  - id: ldap-self-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pr-ldap-self, body: {type: ldap}}
+    expect: *written
+  - id: ldap-self-config
+    depends: [ldap-self-mount]
+    request: {method: POST, path: /v1/compat-pr-ldap-self/config, body: {url: 'ldap://127.0.0.1:1', self_managed: true, schema: openldap, skip_static_role_import_rotation: true}}
+    expect: *written
+  - id: ldap-self-read
+    depends: [ldap-self-config]
+    request: {method: GET, path: /v1/compat-pr-ldap-self/config}
+    expect: {status: 200, exact: {data.self_managed: true, data.skip_static_role_import_rotation: true}}
+  - id: ldap-self-immutable
+    depends: [ldap-self-config]
+    request: {method: POST, path: /v1/compat-pr-ldap-self/config, body: {self_managed: false, binddn: 'cn=compat,dc=example,dc=invalid', bindpass: compat-dummy}}
+    expect: *invalid
+  - id: ldap-self-missing-password
+    depends: [ldap-self-config]
+    request: {method: POST, path: /v1/compat-pr-ldap-self/static-role/missing-password, body: {dn: 'cn=compat,dc=example,dc=invalid', username: compat, rotation_period: 86400, skip_import_rotation: true}}
+    expect: *invalid
+  - id: ldap-self-missing-dn
+    depends: [ldap-self-config]
+    request: {method: POST, path: /v1/compat-pr-ldap-self/static-role/missing-dn, body: {username: compat, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
+    expect: *invalid
+  - id: ldap-self-role
+    depends: [ldap-self-config]
+    request: {method: POST, path: /v1/compat-pr-ldap-self/static-role/compat, body: {dn: 'cn=compat,dc=example,dc=invalid', username: compat, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true, disable_automated_rotation: true}}
+    expect: *written
+  - id: ldap-self-role-read
+    depends: [ldap-self-role]
+    request: {method: GET, path: /v1/compat-pr-ldap-self/static-role/compat}
+    expect: {status: 200, exact: {data.dn: 'cn=compat,dc=example,dc=invalid', data.username: compat, data.rotation_period: 86400}}
+  - id: ldap-rotation-policy-create
+    request: {method: POST, path: /v1/sys/policies/rotation/compat-pr-policy, body: {max_retry_cycles: 3, max_retries_per_cycle: 3}}
+    expect: *written
+  - id: ldap-role-with-rotation-policy
+    depends: [ldap-self-config, ldap-rotation-policy-create]
+    request: {method: POST, path: /v1/compat-pr-ldap-self/static-role/with-policy, body: {dn: 'cn=compat-policy,dc=example,dc=invalid', username: compat-policy, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true, disable_automated_rotation: true, rotation_policy: compat-pr-policy}}
+    expect: *written
+  - id: ldap-role-policy-read
+    depends: [ldap-role-with-rotation-policy]
+    request: {method: GET, path: /v1/compat-pr-ldap-self/static-role/with-policy}
+    expect: {status: 200, exact: {data.rotation_policy: compat-pr-policy}}
+  - id: ldap-self-bindpass-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pr-ldap-invalid, body: {type: ldap}}
+    expect: *written
+  - id: ldap-self-bindpass-exclusive
+    depends: [ldap-self-bindpass-mount]
+    request: {method: POST, path: /v1/compat-pr-ldap-invalid/config, body: {url: 'ldap://127.0.0.1:1', self_managed: true, bindpass: compat-dummy}}
+    expect: *invalid
+  - id: ldap-migration-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pr-ldap-migration, body: {type: ldap}}
+    expect: *written
+  - id: ldap-migration-required-flag
+    depends: [ldap-migration-mount]
+    request: {method: GET, path: /v1/compat-pr-ldap-migration/static-migration}
+    expect: *invalid
+  - id: ldap-migration-empty-status
+    depends: [ldap-migration-mount]
+    request: {method: GET, path: '/v1/compat-pr-ldap-migration/static-migration?include_role_names=false'}
+    expect: {status: [200, 204]}
+  - id: ldap-migration-empty-start
+    depends: [ldap-migration-mount]
+    request: {method: POST, path: /v1/compat-pr-ldap-migration/static-migration}
+    expect: *written
+  - id: ldap-migration-stop
+    depends: [ldap-migration-mount]
+    request: {method: POST, path: /v1/compat-pr-ldap-migration/static-migration/stop}
+    expect: *written
+  - id: database-mount
+    request: {method: POST, path: /v1/sys/mounts/compat-pr-db, body: {type: database}}
+    expect: *written
+  - id: database-config
+    depends: [database-mount]
+    request:
+      method: POST
+      path: /v1/compat-pr-db/config/compat
+      body: &db-config
+        plugin_name: postgresql-database-plugin
+        connection_url: 'postgresql://{{username}}:{{password}}@127.0.0.1:1/compat?sslmode=disable&connect_timeout=1'
+        verify_connection: false
+        allowed_roles: ['*']
+        username: compat-root
+        password: compat-dummy
+        skip_static_role_import_rotation: true
+    expect: *written
+  - id: database-config-read
+    depends: [database-config]
+    request: {method: GET, path: /v1/compat-pr-db/config/compat}
+    expect: {status: 200, exact: {data.skip_static_role_import_rotation: true}}
+  - id: database-skip-missing-password
+    depends: [database-config]
+    request: {method: POST, path: /v1/compat-pr-db/static-roles/missing-password, body: {db_name: compat, username: compat, rotation_period: 86400, skip_import_rotation: true}}
+    expect: *invalid
+  - id: database-static-skip-import
+    depends: [database-config]
+    request: {method: POST, path: /v1/compat-pr-db/static-roles/compat, body: {db_name: compat, username: compat, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
+    expect: *written
+  - id: database-static-read
+    depends: [database-static-skip-import]
+    request: {method: GET, path: /v1/compat-pr-db/static-roles/compat}
+    expect: {status: 200, exact: {data.username: compat, data.rotation_period: 86400}}
+  - id: database-static-imported-password
+    depends: [database-static-skip-import]
+    request: {method: GET, path: /v1/compat-pr-db/static-creds/compat}
+    expect: {status: 200, exact: {data.username: compat, data.password: compat-dummy}}
+  - id: database-static-exclusive
+    depends: [database-config]
+    request: {method: POST, path: /v1/compat-pr-db/static-roles/exclusive, body: {db_name: compat, username: compat-invalid, password: compat-dummy, rotation_period: 86400, rotation_schedule: '0 0 * * SAT', skip_import_rotation: true}}
+    expect: *invalid
+  - id: database-static-short-period
+    depends: [database-config]
+    request: {method: POST, path: /v1/compat-pr-db/static-roles/short-period, body: {db_name: compat, username: compat-invalid, password: compat-dummy, rotation_period: 4, skip_import_rotation: true}}
+    expect: *invalid
+  - id: database-rootless-config
+    depends: [database-mount]
+    request: {method: POST, path: /v1/compat-pr-db/config/rootless, body: {<<: *db-config, self_managed: true, username: '', password: ''}}
+    expect: *written
+  - id: database-rootless-role
+    depends: [database-rootless-config]
+    request: {method: POST, path: /v1/compat-pr-db/static-roles/rootless, body: {db_name: rootless, username: compat-rootless, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
+    expect: *written
+  - id: database-rootless-password
+    depends: [database-rootless-role]
+    request: {method: GET, path: /v1/compat-pr-db/static-creds/rootless}
+    expect: {status: 200, exact: {data.username: compat-rootless, data.password: compat-dummy}}
+  - id: database-rootless-deprecated-password
+    depends: [database-rootless-config]
+    request: {method: POST, path: /v1/compat-pr-db/static-roles/rootless-legacy, body: {db_name: rootless, username: compat-legacy, self_managed_password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
+    expect: *written
+  - id: database-rootless-deprecated-password-read
+    depends: [database-rootless-deprecated-password]
+    request: {method: GET, path: /v1/compat-pr-db/static-creds/rootless-legacy}
+    expect: {status: 200, exact: {data.username: compat-legacy, data.password: compat-dummy}}
+  - id: database-rootless-username-exclusive
+    depends: [database-mount]
+    request: {method: POST, path: /v1/compat-pr-db/config/invalid-rootless, body: {<<: *db-config, self_managed: true}}
+    expect: *invalid
+  - id: ldap-auth-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-pr-ldap}
+    expect: *written
+  - id: aws-auth-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-pr-aws}
+    expect: *written
+  - id: aws-secret-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pr-aws}
+    expect: *written
+  - id: azure-auth-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-pr-azure}
+    expect: *written
+  - id: azure-secret-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pr-azure}
+    expect: *written
+  - id: gcp-auth-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-pr-gcp}
+    expect: *written
+  - id: gcp-secret-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pr-gcp}
+    expect: *written
+  - id: ldap-self-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pr-ldap-self}
+    expect: *written
+  - id: ldap-policy-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/rotation/compat-pr-policy}
+    expect: *written
+  - id: ldap-invalid-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pr-ldap-invalid}
+    expect: *written
+  - id: ldap-migration-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pr-ldap-migration}
+    expect: *written
+  - id: database-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pr-db}
+    expect: *written

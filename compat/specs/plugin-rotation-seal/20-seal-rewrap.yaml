@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: MPL-2.0
+api: seal-rewrap-and-backing-seal-status
+feature: plugin-rotation-seal
+source: https://developer.hashicorp.com/vault/api-docs/system/sealwrap-rewrap
+source_version: "v2.x (latest)"
+notes: |
+  Additional source: https://developer.hashicorp.com/vault/api-docs/system/seal-backend-status
+  (v2.x (latest)). Root namespace and administrative token; disposable target ONLY.
+  POST starts a real background rewrap over ALL seal-wrapped entries on a supported target.
+  It is not a dry-run and is not /sys/wrapping/rewrap. Do not run against production.
+  Empty fresh dev storage is the baseline; a configured backing seal and seal-wrapped
+  entries are required to verify actual re-encryption, which this suite does not claim.
+  POST returns 202 when started or 200 if already running. No timing-dependent assertion
+  of is_running, fixed entry counts, seal name, health, or fully_wrapped value.
+  Backing-seal status is unauthenticated, top-level JSON (NOT data-wrapped).
+  unhealthy_since is optional; RFC3339 formatting and counter relations are fixture/manual checks.
+cases:
+  - id: backing-seal-status-public
+    no_auth: true
+    request: {method: GET, path: /v1/sys/seal-backend-status, headers: {X-Vault-Token: ''}}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [healthy, fully_wrapped, backends]
+        properties:
+          healthy: {type: boolean}
+          fully_wrapped: {type: boolean}
+          unhealthy_since: {type: string}
+          backends:
+            type: array
+            items:
+              type: object
+              required: [name, configured, disabled, healthy]
+              properties:
+                name: {type: string}
+                configured: {type: boolean}
+                disabled: {type: boolean}
+                healthy: {type: boolean}
+                unhealthy_since: {type: string}
+  - id: rewrap-status
+    request: {method: GET, path: /v1/sys/sealwrap/rewrap}
+    expect: &rewrap-status
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [entries, is_running]
+            properties:
+              is_running: {type: boolean}
+              entries:
+                type: object
+                required: [failed, processed, succeeded]
+                properties:
+                  failed: {type: integer}
+                  processed: {type: integer}
+                  succeeded: {type: integer}
+  - id: rewrap-start
+    request: {method: POST, path: /v1/sys/sealwrap/rewrap, body: {}}
+    expect: {status: [200, 202]}
+  - id: rewrap-status-after-start
+    depends: [rewrap-start]
+    request: {method: GET, path: /v1/sys/sealwrap/rewrap}
+    expect: *rewrap-status
