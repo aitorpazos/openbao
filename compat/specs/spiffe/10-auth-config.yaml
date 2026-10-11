@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: MPL-2.0
+api: spiffe-auth-configuration
+feature: spiffe
+source: https://developer.hashicorp.com/vault/api-docs/auth/spiffe
+source_version: "v2.x (latest)"
+notes: |
+  Source: Create configuration and Read configuration. Mount lifecycle and
+  listing: https://developer.hashicorp.com/vault/api-docs/system/auth.
+  Plugin type and licensing: https://developer.hashicorp.com/vault/docs/auth/spiffe/spiffe.
+  Statuses/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources display v2.x (latest).
+  Run against a disposable initialized, unsealed, appropriately licensed target
+  with an administrative token in root namespace. Reserve auth/compat-spiffe-config/;
+  it MUST be absent initially and not used concurrently. Cleanup unconditionally
+  disables only this mount. Never run against a pre-existing mount of this name.
+  Negative cases precede any valid config, avoiding required-field update ambiguity.
+  defer_bundle_fetch explicitly permits configuring an unavailable remote endpoint.
+  https://127.0.0.1:1 is a reserved unavailable fixture on the TARGET; no server
+  or external SPIRE is required. Deferred initial fetch does not promise suppression
+  of later background fetches. No refresh/cache metadata assertions without a bundle.
+  Config read example omits the HTTP envelope; assert object/success only rather
+  than guessing field locations. No DELETE config or dedicated status API is documented.
+  No exact error wording is documented. Dependencies are same-file only.
+cases:
+  - id: mount-enable
+    request:
+      method: POST
+      path: /v1/sys/auth/compat-spiffe-config
+      body: {type: spiffe, config: {passthrough_request_headers: [Authorization]}}
+    expect: {status: [200, 204]}
+  - id: mount-read
+    depends: [mount-enable]
+    request: {method: GET, path: /v1/sys/auth/compat-spiffe-config}
+    expect:
+      status: 200
+      exact: {data.type: spiffe}
+  - id: mount-list
+    depends: [mount-enable]
+    request: {method: GET, path: /v1/sys/auth}
+    expect:
+      status: 200
+      exact: {data.compat-spiffe-config/.type: spiffe}
+  - id: missing-trust-domain
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {profile: https_web_bundle, endpoint_url: 'https://127.0.0.1:1', defer_bundle_fetch: true}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: missing-profile
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, defer_bundle_fetch: true}
+    expect: *invalid
+  - id: invalid-profile
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, profile: not-a-profile, defer_bundle_fetch: true}
+    expect: *invalid
+  - id: static-missing-bundle
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, profile: static}
+    expect: *invalid
+  - id: static-invalid-bundle
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, profile: static, bundle: not-pem-or-jwks}
+    expect: *invalid
+  - id: web-bundle-missing-endpoint
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, profile: https_web_bundle, defer_bundle_fetch: true}
+    expect: *invalid
+  - id: web-pem-missing-endpoint
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, profile: https_web_pem, defer_bundle_fetch: true}
+    expect: *invalid
+  - id: configure-deferred-web-bundle
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, profile: https_web_bundle, endpoint_url: 'https://127.0.0.1:1', defer_bundle_fetch: true, audience: [vault]}
+    expect: {status: [200, 204]}
+  - id: read-configuration
+    depends: [mount-enable, configure-deferred-web-bundle]
+    request: {method: GET, path: /v1/auth/compat-spiffe-config/config}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: update-audience
+    depends: [mount-enable, configure-deferred-web-bundle]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-config/config
+      body: {trust_domain: example.org, profile: https_web_bundle, endpoint_url: 'https://127.0.0.1:1', defer_bundle_fetch: true, audience: []}
+    expect: {status: [200, 204]}
+  - id: read-updated-configuration
+    depends: [mount-enable, configure-deferred-web-bundle, update-audience]
+    request: {method: GET, path: /v1/auth/compat-spiffe-config/config}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-spiffe-config}
+    expect: {status: [200, 204]}

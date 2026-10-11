@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: MPL-2.0
+api: spiffe-auth-role-management
+feature: spiffe
+source: https://developer.hashicorp.com/vault/api-docs/auth/spiffe
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Create/Read/Delete/List role. Required workload_id_patterns,
+  supported wildcards, default display_name, token settings and the prohibition
+  on identical patterns across roles derive from Create role.
+  Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/auth;
+  type/license: https://developer.hashicorp.com/vault/docs/auth/spiffe/spiffe;
+  statuses/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources display v2.x (latest).
+  Require a disposable licensed, unsealed target, root-namespace administrative
+  token. Reserve initially absent auth/compat-spiffe-roles/ and its roles
+  compat-role, compat-duplicate, compat-invalid. No configuration or external
+  issuer is documented as a prerequisite for role management; no login is attempted.
+  Read/list samples omit their HTTP envelope, so only object/success is asserted;
+  no invented data wrapper, exact field location, or error wording. Empty LIST
+  and deleted read use the general API 404 contract; empty LIST errors=[] is
+  explicitly documented in the general API's API operations section.
+  Cleanup unconditionally disables the entire reserved mount, removing even an
+  erroneously accepted invalid/duplicate role. No cross-file dependencies.
+cases:
+  - id: mount-enable
+    request:
+      method: POST
+      path: /v1/sys/auth/compat-spiffe-roles
+      body: {type: spiffe}
+    expect: {status: [200, 204]}
+  - id: list-initially-empty
+    depends: [mount-enable]
+    request: {method: LIST, path: /v1/auth/compat-spiffe-roles/role}
+    expect: {status: 404, exact: {errors: []}}
+  - id: missing-workload-patterns
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-roles/role/compat-invalid
+      body: {}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: role-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-roles/role/compat-role
+      body:
+        workload_id_patterns: [service1, 'team1/*', 'team2/+/service1']
+        token_policies: [default]
+        token_ttl: 5m
+        alias_metadata: {suite: compat-spiffe}
+    expect: {status: [200, 204]}
+  - id: role-read
+    depends: [mount-enable, role-create]
+    request: {method: GET, path: /v1/auth/compat-spiffe-roles/role/compat-role}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: roles-list
+    depends: [mount-enable, role-create]
+    request: {method: LIST, path: /v1/auth/compat-spiffe-roles/role}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: duplicate-workload-pattern
+    depends: [mount-enable, role-create]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-roles/role/compat-duplicate
+      body: {workload_id_patterns: [service1]}
+    expect: *invalid
+  - id: role-update
+    depends: [mount-enable, role-create]
+    request:
+      method: POST
+      path: /v1/auth/compat-spiffe-roles/role/compat-role
+      body:
+        workload_id_patterns: [service2]
+        display_name: compat-updated
+        token_type: batch
+        token_ttl: 10m
+    expect: {status: [200, 204]}
+  - id: role-read-updated
+    depends: [mount-enable, role-create, role-update]
+    request: {method: GET, path: /v1/auth/compat-spiffe-roles/role/compat-role}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: role-delete
+    request: {method: DELETE, path: /v1/auth/compat-spiffe-roles/role/compat-role}
+    expect: {status: [200, 204]}
+  - id: role-read-deleted
+    depends: [mount-enable, role-create, role-delete]
+    request: {method: GET, path: /v1/auth/compat-spiffe-roles/role/compat-role}
+    expect:
+      status: 404
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-spiffe-roles}
+    expect: {status: [200, 204]}
