@@ -1294,6 +1294,7 @@ func (c *Core) configureCredentialsBackends(backends map[string]logical.Factory,
 	}
 
 	c.credentialBackends = credentialBackends
+	c.credentialBackends["spiffe"] = spiffeFactory(true, c.redirectAddr)
 }
 
 // configureLogicalBackends configures the Core with the ability to create
@@ -1312,6 +1313,7 @@ func (c *Core) configureLogicalBackends(backends map[string]logical.Factory, log
 	// Transform configuration resources.
 	logicalBackends["transform"] = TransformBackendFactory
 	logicalBackends["kmip"] = KMIPBackendFactory
+	logicalBackends["spiffe"] = spiffeFactory(false, c.redirectAddr)
 
 	// Cubbyhole
 	logicalBackends[routing.MountTypeCubbyhole] = CubbyholeBackendFactory
