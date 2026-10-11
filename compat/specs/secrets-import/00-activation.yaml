@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-activation-flags-secrets-import
+feature: secrets-import
+source: https://developer.hashicorp.com/vault/docs/import
+source_version: v2.x (latest)
+notes: >-
+  Sources: vault/docs/import ("Activate secrets import" — PUT
+  /sys/activation-flags/secrets-import/activate; import is a Beta,
+  Enterprise-gated feature) and api-docs/system/activation-flags
+  (WriteActivationFlags — PUT /sys/activation-flags/:feature/activate;
+  ReadActivationFlags — GET /sys/activation-flags returning activated and
+  unactivated lists). Activation is one-way; there is no documented
+  deactivation. The docs overview (Beta) and the CLI command page (Alpha)
+  disagree on maturity — the overview's Beta label is used here. The
+  feature is only activated (not exercised): actual import runs are a
+  separate workflow. Re-activation is accepted as an idempotent no-op;
+  the docs do not specify repeated-activation behavior.
+cases:
+  - id: read-pre-activation
+    request:
+      method: GET
+      path: /v1/sys/activation-flags
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [activated, unactivated]
+            properties:
+              activated: {type: array, items: {type: string}}
+              unactivated: {type: array, items: {type: string}}
+      contains:
+        data.unactivated: [secrets-import]
+  - id: activate
+    request:
+      method: PUT
+      path: /v1/sys/activation-flags/secrets-import/activate
+    expect:
+      status: [204]
+  - id: read-post-activation
+    request:
+      method: GET
+      path: /v1/sys/activation-flags
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [activated, unactivated]
+            properties:
+              activated: {type: array, items: {type: string}}
+              unactivated: {type: array, items: {type: string}}
+      contains:
+        data.activated: [secrets-import]
+  - id: activate-again-idempotent
+    request:
+      method: PUT
+      path: /v1/sys/activation-flags/secrets-import/activate
+    expect:
+      status: [204]
+  - id: unknown-feature-activation
+    request:
+      method: PUT
+      path: /v1/sys/activation-flags/unknown-feature/activate
+    expect:
+      status: [404]

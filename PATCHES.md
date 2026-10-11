@@ -72,6 +72,8 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/request_handling.go` | In the approved control-group deferred-unwrap path: `deferredReq.WrapInfo = nil` before re-execution; explicit `tokenStore.UseToken` consumption after the deferred request runs | Re-executing the stored request as-is re-wrapped the response (wrap-of-the-wrap) instead of returning the original data; the early return also bypassed the normal use-count decrement, leaving the wrapping token reusable after a successful unwrap (response-wrapping tokens are single-use) | — |
 | `internal/helper/random/drbg.go` (new) | HMAC-mode Hash_DRBG per NIST SP 800-90A Rev 1 (SHA-256, 256-bit strength): instantiate/update/generate with post-generate no-data update | The documented drbg option of the random API ("seeds a cryptographically secure random generator with a seed from the chosen source") had no implementation | — |
 | `internal/helper/random/random_api.go` | +`drbg` parameter (auto/hmacdrbg → seed from the chosen source, generate via HMAC-DRBG); caps split per docs: 10MB for platform/DRBG, 128KB for seal/all (was a global 128KB) | Documented Generate-random-bytes contract (api-docs/system/tools, v2.x (latest)); seal/all keep the pre-existing degradation to platform sampling with the seal warning | — |
+| `internal/vault/logical_system_activation_flags.go` | +`activation-flags/secrets-import/activate` route; the read lists secrets-import alongside enable-scim (activated/unactivated); the activate operation dispatches on the request path | Documented Secrets import activation (docs/import — PUT /sys/activation-flags/secrets-import/activate; Beta feature) and the WriteActivationFlags API (:feature/activate) | — |
+| `internal/vault/activation_flags.go` (new) | +core-level one-time activation-flag storage (ActivationFlagActive / ActivateActivationFlag) | Same as above; activation is one-way per the docs ("Once removed, you cannot un-activate gated features") | — |
 | `internal/vault/logical_system.go` | password-policy create/update: `entropy_source` parameter ("", platform, seal) — seal rejected with 400 ("entropy_source \"seal\" requires entropy augmentation which is not available"); stored on the policy and echoed by read (omitted when empty, matching the docs read sample) | Documented `entropy_source` parameter of the password-policy API (api-docs/system/policies-password, v2.x (latest)); generation itself always uses the platform source on the fork (the only honorable source) | — |
 | `internal/vault/logical_system_paths.go` | +`drbg` field on the `tools/random` path schema | Same as above (the field must exist in the schema for body-form delivery) | — |
 | `internal/vault/quotas/quotas.go` | +`EntityID` on the quota Request; +`Manager.EntityGroupingRateQuotas()` flag | Documented identity-based rate-limit quotas (api-docs/system/rate-limit-quotas + guide): group_by entity_then_ip/entity_then_none bucket requests by entity | — |
@@ -350,6 +352,11 @@ Core seams (ledger rows above):
   explicit 400 refusal for seal (entropy augmentation needs an HSM-backed
   seal); specs/entropy/10-password-policies.yaml (8 cases) covers default
   omission, platform echo, seal/invalid rejection and generation.
+- Secrets import activation flag (compat-control-group branch): the
+  documented one-time activation endpoint is now implemented alongside the
+  existing enable-scim flag; specs/secrets-import/00-activation.yaml (5
+  cases) covers the read lists, activation, one-way semantics and unknown
+  feature 404.
 - Identity-based rate-limit quotas (compat-control-group branch): the
   configuration surface was already implemented (fields + validation +
   readback); this lane implemented the ENFORCEMENT — requests carrying an
