@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: MPL-2.0
+api: raft_autosnapshot_config
+feature: raft-autosnapshot
+source: https://developer.hashicorp.com/vault/api-docs/system/storage/raftautosnapshots
+source_version: "v2.x (latest)"
+notes: >-
+  Root namespace, sudo-capable token, disposable Raft storage target. Reserve
+  compat-snap-crud and compat-snap-invalid; neither may preexist. The server-side
+  /tmp/compat-snap-crud directory must be writable if a snapshot runs. Local-only,
+  no cloud credentials. Cleanup has no dependencies so failed assertions cannot
+  suppress it. Do not run concurrently with another copy of these fixtures.
+  POST is documented for create/update; no PATCH or partial-update semantics
+  assumed. Read schema/defaults and LIST shape come from the API samples.
+  Status codes and errors envelope additionally derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and
+  #error-response (v2.x (latest)). Unknown/deleted reads use that general 404
+  contract, not an endpoint-specific example; exact error text/body is unknown.
+  Invalid intervals test documented syntax/types, not undocumented minimums.
+  A PASS for expected 404 alone does not establish feature availability.
+cases:
+  - id: config-unknown-read
+    request: {method: GET, path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-crud}
+    expect: &not-found
+      status: 404
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: config-missing-interval
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid
+      body: {storage_type: local, path_prefix: /tmp/compat-snap-crud/, local_max_space: 10000000}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: config-missing-path-prefix
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid
+      body: {interval: 24h, storage_type: local, local_max_space: 10000000}
+    expect: *invalid
+  - id: config-missing-storage-type
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid
+      body: {interval: 24h, path_prefix: /tmp/compat-snap-crud/, local_max_space: 10000000}
+    expect: *invalid
+  - id: config-missing-local-max-space
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid
+      body: {interval: 24h, storage_type: local, path_prefix: /tmp/compat-snap-crud/}
+    expect: *invalid
+  - id: config-invalid-interval-syntax
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid
+      body: {interval: not-a-duration, storage_type: local, path_prefix: /tmp/compat-snap-crud/, local_max_space: 10000000}
+    expect: *invalid
+  - id: config-invalid-interval-object
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid
+      body: {interval: {invalid: true}, storage_type: local, path_prefix: /tmp/compat-snap-crud/, local_max_space: 10000000}
+    expect: *invalid
+  - id: config-local-autoload-rejected
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid
+      body: {interval: 24h, storage_type: local, path_prefix: /tmp/compat-snap-crud/, local_max_space: 10000000, autoload_enabled: true}
+    expect: *invalid
+  - id: config-create-duration
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-crud
+      body: {interval: 24h, storage_type: local, path_prefix: /tmp/compat-snap-crud/, local_max_space: 10000000}
+    expect: {status: [200, 204]}
+  - id: config-read-defaults
+    depends: [config-create-duration]
+    request: {method: GET, path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-crud}
+    expect:
+      status: 200
+      body_schema: &config-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [file_prefix, interval, local_max_space, path_prefix, retain, storage_type]
+            properties:
+              file_prefix: {type: string}
+              interval: {type: integer}
+              local_max_space: {type: integer}
+              path_prefix: {type: string}
+              retain: {type: integer}
+              storage_type: {type: string}
+      exact: {data.file_prefix: vault-snapshot, data.interval: 86400, data.local_max_space: 10000000, data.path_prefix: /tmp/compat-snap-crud/, data.retain: 1, data.storage_type: local}
+  - id: config-list
+    depends: [config-create-duration]
+    request: {method: LIST, path: /v1/sys/storage/raft/snapshot-auto/config}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys]
+            properties:
+              keys: {type: array, items: {type: string}}
+      contains: {data.keys: [compat-snap-crud]}
+  - id: config-update-integer-seconds
+    depends: [config-create-duration]
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-crud
+      body: {interval: 86400, retain: 7, file_prefix: compat-snap-updated, storage_type: local, path_prefix: /tmp/compat-snap-crud/, local_max_space: 10000000}
+    expect: {status: [200, 204]}
+  - id: config-read-updated
+    depends: [config-create-duration, config-update-integer-seconds]
+    request: {method: GET, path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-crud}
+    expect:
+      status: 200
+      body_schema: *config-schema
+      exact: {data.file_prefix: compat-snap-updated, data.interval: 86400, data.local_max_space: 10000000, data.path_prefix: /tmp/compat-snap-crud/, data.retain: 7, data.storage_type: local}
+  - id: config-delete
+    request: {method: DELETE, path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-crud}
+    expect: {status: [200, 204]}
+  - id: config-read-deleted
+    depends: [config-delete]
+    request: {method: GET, path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-crud}
+    expect: *not-found
+  - id: config-invalid-cleanup
+    request: {method: DELETE, path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-invalid}
+    expect: {status: [200, 204, 404]}

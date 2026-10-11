@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MPL-2.0
+api: raft_autosnapshot_status
+feature: raft-autosnapshot
+source: https://developer.hashicorp.com/vault/api-docs/system/storage/raftautosnapshots
+source_version: "v2.x (latest)"
+notes: >-
+  The documented route is GET status/:name, NOT bare status. Root namespace,
+  sudo-capable token for fixture creation/deletion, disposable Raft storage
+  target. Reserve compat-snap-status and server directory /tmp/compat-snap-status/.
+  No snapshot completion or scheduling delay assumed. The status samples show
+  string fields after snapshot activity but do not specify their presence before
+  the first snapshot, so only data is required and sample fields are typed when
+  present. No timestamp format assertion: the sample snapshot_start has a typo.
+  Autoload-only fields are not required for this local fixture. General success
+  codes derive from https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  (v2.x (latest)). Cleanup always runs, including after failed status assertions.
+cases:
+  - id: status-config-create
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-status
+      body: {interval: 24h, retain: 1, file_prefix: compat-snap-status, storage_type: local, path_prefix: /tmp/compat-snap-status/, local_max_space: 10000000}
+    expect: {status: [200, 204]}
+  - id: status-named-shape
+    depends: [status-config-create]
+    request: {method: GET, path: /v1/sys/storage/raft/snapshot-auto/status/compat-snap-status}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            properties:
+              last_snapshot_end: {type: string}
+              last_snapshot_error: {type: string}
+              last_snapshot_start: {type: string}
+              last_snapshot_url: {type: string}
+              snapshot_start: {type: string}
+              snapshot_url: {type: string}
+              next_snapshot_start: {type: string}
+              loaded_snapshot_expires_at: {type: string}
+              loaded_snapshot_id: {type: string}
+              loaded_snapshot_status: {type: string}
+              loading_error: {type: string}
+  - id: status-config-delete
+    request: {method: DELETE, path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-status}
+    expect: {status: [200, 204]}
