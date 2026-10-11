@@ -19,6 +19,7 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.enterpriseConfigPaths()...)` | Registers group-policy-application and UI custom-message/default-auth configuration APIs; namespace-local barrier storage; group policy evaluation and UI consumption are separate integrations | — |
 | `internal/vault/logical_system.go` | +1 path registration: `b.oauthResourceServerPaths()` | Namespace-scoped OAuth resource server configuration API (configuration only; JWT authentication deferred) | — |
 | `internal/vault/core.go` | +1 factory registration: `logicalBackends["agent-registry"] = c.agentRegistryFactory` | Agent registry backend at documented root-level path | — |
 | `internal/vault/mount.go` | Required agent-registry mount helper call; backfill helper in mount upgrades for preexisting namespaces; protected/untunable/singleton entries | Expose `/agent-registry/` in each namespace through normal ACL-aware routing, without HTTP or request-handling rewrites | — |
