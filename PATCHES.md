@@ -72,6 +72,7 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/request_handling.go` | In the approved control-group deferred-unwrap path: `deferredReq.WrapInfo = nil` before re-execution; explicit `tokenStore.UseToken` consumption after the deferred request runs | Re-executing the stored request as-is re-wrapped the response (wrap-of-the-wrap) instead of returning the original data; the early return also bypassed the normal use-count decrement, leaving the wrapping token reusable after a successful unwrap (response-wrapping tokens are single-use) | — |
 | `internal/helper/random/drbg.go` (new) | HMAC-mode Hash_DRBG per NIST SP 800-90A Rev 1 (SHA-256, 256-bit strength): instantiate/update/generate with post-generate no-data update | The documented drbg option of the random API ("seeds a cryptographically secure random generator with a seed from the chosen source") had no implementation | — |
 | `internal/helper/random/random_api.go` | +`drbg` parameter (auto/hmacdrbg → seed from the chosen source, generate via HMAC-DRBG); caps split per docs: 10MB for platform/DRBG, 128KB for seal/all (was a global 128KB) | Documented Generate-random-bytes contract (api-docs/system/tools, v2.x (latest)); seal/all keep the pre-existing degradation to platform sampling with the seal warning | — |
+| `internal/vault/logical_system.go` | password-policy create/update: `entropy_source` parameter ("", platform, seal) — seal rejected with 400 ("entropy_source \"seal\" requires entropy augmentation which is not available"); stored on the policy and echoed by read (omitted when empty, matching the docs read sample) | Documented `entropy_source` parameter of the password-policy API (api-docs/system/policies-password, v2.x (latest)); generation itself always uses the platform source on the fork (the only honorable source) | — |
 | `internal/vault/logical_system_paths.go` | +`drbg` field on the `tools/random` path schema | Same as above (the field must exist in the schema for body-form delivery) | — |
 | `internal/vault/identity/mfa.go` | +`ValidateMFASelfEnrollment` (pop+re-push pending under queue lock, namespace/entity binding) + `enable_self_enrollment` on config create/read | Self-enrollment semantics: enrollment must not consume the pending login; non-entity tokens rejected | — |
 | `internal/vault/login_mfa.go` | +`enable_self_enrollment` persisted on login MFA TOTP method config (create/update/read) | Operator-visible knob enabling self-enrollment per method | — |
@@ -340,7 +341,11 @@ Core seams (ledger rows above):
   caps split (10MB platform/DRBG vs 128KB seal/all); the seal warning and
   the "all has no warning" semantics are preserved exactly (the sibling's
   transit random specs assert them).
-- `internal/vault/logical_system_paths.go`: drbg field on the sys path only
+- `internal/vault/logical_system.go` / `logical_system_paths.go`: the documented
+  password-policy `entropy_source` parameter ("", platform, seal) with an
+  explicit 400 refusal for seal (entropy augmentation needs an HSM-backed
+  seal); specs/entropy/10-password-policies.yaml (8 cases) covers default
+  omission, platform echo, seal/invalid rejection and generation.
   (the transit docs do not document drbg; transit gets it via the shared
   helper but no schema field → inert).
 - Entropy augmentation's config-file stanza (entropy "seal") is a server

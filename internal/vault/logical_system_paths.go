@@ -4002,6 +4002,11 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 					Type:        framework.TypeString,
 					Description: "The password policy",
 				},
+				"entropy_source": {
+					Type:        framework.TypeString,
+					Default:     "",
+					Description: `Specifies an override to the default source of entropy (randomness) used to generate the passwords. Must be one of: "" - source randomness from the default source. platform - source randomness from the platform RNG. seal - source entropy from the entropy augmentation. Enterprise`,
+				},
 			},
 
 			Operations: map[logical.Operation]framework.OperationHandler{

@@ -2791,6 +2791,10 @@ func (b *SystemBackend) handlePoliciesDelete(policyType policy.Type) framework.O
 
 type passwordPolicyConfig struct {
 	HCLPolicy string `json:"policy"`
+	// EntropySource is the documented entropy_source override of the
+	// password-policy API: "", "platform", or "seal" (enterprise entropy
+	// augmentation). Empty means the default source.
+	EntropySource string `json:"entropy_source,omitempty"`
 }
 
 func getPasswordPolicyKey(policyName string) string {
@@ -2883,8 +2887,23 @@ func (*SystemBackend) handlePoliciesPasswordSet(ctx context.Context, req *logica
 		}
 	}
 
+	entropySource := data.Get("entropy_source").(string)
+	switch entropySource {
+	case "", "platform":
+	case "seal":
+		// Seal sourcing requires entropy augmentation, which needs an
+		// HSM-backed seal; without one the requested source cannot be
+		// honored, so reject instead of silently degrading.
+		return nil, logical.CodedError(http.StatusBadRequest,
+			"entropy_source \"seal\" requires entropy augmentation which is not available")
+	default:
+		return nil, logical.CodedError(http.StatusBadRequest,
+			"invalid entropy_source %q; must be \"\", \"platform\", or \"seal\"", entropySource)
+	}
+
 	cfg := passwordPolicyConfig{
-		HCLPolicy: rawPolicy,
+		HCLPolicy:     rawPolicy,
+		EntropySource: entropySource,
 	}
 	entry, err := logical.StorageEntryJSON(getPasswordPolicyKey(policyName), cfg)
 	if err != nil {
@@ -2919,6 +2938,9 @@ func (*SystemBackend) handlePoliciesPasswordGet(ctx context.Context, req *logica
 		Data: map[string]any{
 			"policy": cfg.HCLPolicy,
 		},
+	}
+	if cfg.EntropySource != "" {
+		resp.Data["entropy_source"] = cfg.EntropySource
 	}
 
 	return resp, nil
