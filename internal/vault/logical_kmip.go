@@ -17,14 +17,16 @@ import (
 	"github.com/openbao/openbao/sdk/v2/logical"
 )
 
-// KMIPBackendFactory implements the KMIP HTTP control plane. It does not start
-// a native KMIP listener or implement TTLV operations. Listener writes persist
-// configuration only and explicitly warn callers about that boundary.
+// KMIPBackendFactory implements the HTTP control plane and native KMIP subset.
 func KMIPBackendFactory(ctx context.Context, conf *logical.BackendConfig) (logical.Backend, error) {
 	if conf == nil {
 		return nil, errors.New("nil KMIP backend configuration")
 	}
-	b := &kmipBackend{Backend: &framework.Backend{BackendType: logical.TypeLogical, Help: "KMIP HTTP control plane (native KMIP protocol not implemented).", PathsSpecial: &logical.Paths{SealWrapStorage: []string{"ca/"}}}}
+	b := &kmipBackend{Backend: &framework.Backend{BackendType: logical.TypeLogical, Help: "KMIP control plane and native KMIP 1.4 subset.", PathsSpecial: &logical.Paths{SealWrapStorage: []string{"ca/", "scope/"}}}}
+	b.Clean = b.kmipCleanup
+	b.InitializeFunc = func(ctx context.Context, req *logical.InitializationRequest) error {
+		return b.kmipReconcile(ctx, req.Storage)
+	}
 	fields := map[string]*framework.FieldSchema{}
 	for _, k := range strings.Fields("scope role name action ca key_type ca_pem scope_name scope_field role_name role_field address tls_min_version tls_max_version tls_cipher_suites tls_client_key_type serial_number certificate csr format") {
 		fields[k] = &framework.FieldSchema{Type: framework.TypeString}
@@ -70,7 +72,8 @@ func KMIPBackendFactory(ctx context.Context, conf *logical.BackendConfig) (logic
 
 type kmipBackend struct {
 	*framework.Backend
-	mu sync.RWMutex
+	mu        sync.RWMutex
+	listeners kmipListeners
 }
 
 var kmipOperations = strings.Fields("all none activate add_attribute create decrypt destroy discover_versions encrypt get get_attribute_list get_attributes import locate query register rekey revoke create_keypair delete_attribute mac mac_verify modify_attribute rekey_keypair sign signature_verify rng_seed rng_retrieve")
@@ -302,7 +305,7 @@ func (b *kmipBackend) resource(ctx context.Context, req *logical.Request, d *fra
 		if err := kmipSave(ctx, req.Storage, path, data); err != nil {
 			return nil, err
 		}
-		return &logical.Response{Data: data, Warnings: []string{"HTTP configuration only: native KMIP listener is not implemented; no socket was opened."}}, nil
+		return &logical.Response{Data: data}, nil
 	}
 	return nil, kmipSave(ctx, req.Storage, path, data)
 }

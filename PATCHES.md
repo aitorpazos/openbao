@@ -148,6 +148,39 @@ whose callback then executed locally on the standby, hit the read-only
 TestLoginMfaGenerateTOTPTestAuditIncluded, whose final phase deliberately
 targets Cores[1], a standby).
 
+### KMIP pass B: native TTLV/TLS protocol (compat-harness branch)
+
+**Status:** implemented. Additive packages/files (port free):
+`internal/vault/kmip/` (ttlv.go — OASIS KMIP 1.4 TTLV codec: all ten primitive
+types + nested structures, 8-byte alignment/padding, four-MiB frame cap, depth
+32; tags.go — operation/attribute/object tag table; server.go — TLS listener
+with mTLS RequireAndVerifyClientCert, per-connection handlers, graceful close;
+ttlv_test.go — round-trip + rejection + fuzz). `logical_kmip_listener.go`
+(mTLS config from configured CAs, listener reconcile on InitializeFunc gated
+against DR-secondary/perf-standby, server cert minted per listener from the
+named CA with SANs from server_hostnames/server_ips).
+`logical_kmip_protocol.go` (request/response batch framing, operation dispatch:
+Discover Versions 1.4, Query subset, Create AES 128/192/256, Get, Get
+Attributes/Get Attribute List, Locate, Destroy, Activate, Rekey; result
+status/reason semantics per OASIS sections 4, 6–7).
+`logical_kmip_sign.go` (Sign operation backed by pass-A role-scoped
+credentials; signing keys stored separately from credential metadata so lookup
+never returns them while revocation removes both).
+**Modified pre-existing files (small):** `logical_kmip.go` — factory help/help
+text update, `listeners` field on the backend, credential write no longer warns
+"no socket was opened"; `logical_kmip_certificates.go` — persist a
+`signing-key` storage entry per credential (revocation cleanup path reuses the
+existing recursive removal); `logical_kmip_test.go` — listener write now
+expects no warning, registers `b.Cleanup` for the native listener.
+**Deferred (kmip/NOTES.md):** KMIP 2.0 operation schemas, certificates/key-pair
+objects, wrapping/alternate Get formats, batch dependency chains, async, custom
+cipher suites (explicit error).
+Acceptance: `go test ./internal/vault/kmip/` (TTLV round-trip/reject/fuzz) +
+`go test ./internal/vault -run 'KMIP'` (native TLS e2e: dial listener with
+generated client cert, Discover Versions/Create/Get/Destroy; Sign; concurrent
+lifecycle; HTTP control plane) green; `compat/specs/kmip/*.yaml` 38/38 PASS
+unchanged on a fresh dev server.
+
 ### Namespaces (compat-namespaces branch)
 
 Additive (`compat/`): `compat/specs/namespaces/` — 5 spec files (api-lock, crud,

@@ -142,9 +142,10 @@ func TestKMIPHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	call(write, cred+"/revoke", map[string]interface{}{"certificate": r.Data["certificate"]}, false)
-	r = call(write, "listener/l", map[string]interface{}{"ca": "root", "address": "127.0.0.1:5696"}, false)
-	if len(r.Warnings) == 0 {
-		t.Fatal("listener must disclose that no socket was opened")
+	t.Cleanup(func() { b.Cleanup(ctx) })
+	r = call(write, "listener/l", map[string]interface{}{"ca": "root", "address": "127.0.0.1:0"}, false)
+	if len(r.Warnings) != 0 {
+		t.Fatal("native listener unexpectedly warned", r.Warnings)
 	}
 	call(write, "ca/imported/import", map[string]interface{}{"ca_pem": ca.Data["certificate"], "scope_name": "s", "role_field": "CN"}, false)
 	call(write, "ca/imported", map[string]interface{}{"scope_field": "OU"}, true)

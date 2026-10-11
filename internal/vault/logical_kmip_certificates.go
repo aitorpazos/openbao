@@ -332,6 +332,12 @@ func (b *kmipBackend) credential(ctx context.Context, req *logical.Request, d *f
 		if err != nil {
 			return nil, err
 		}
+		// Keep signing material separate from credential metadata: lookup never
+		// returns it, while revocation recursively removes both records.
+		if err := req.Storage.Put(ctx, &logical.StorageEntry{Key: prefix + "/" + kmipString(data, "serial_number") + "/signing-key", Value: []byte(encoded)}); err != nil {
+			_ = kmipRemove(ctx, req.Storage, prefix+"/"+kmipString(data, "serial_number")+"/")
+			return nil, err
+		}
 		data["private_key"] = encoded
 	}
 	return &logical.Response{Data: kmipFormat(data, format), Warnings: warnings}, nil
