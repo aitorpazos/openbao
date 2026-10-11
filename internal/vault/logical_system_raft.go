@@ -35,7 +35,7 @@ const maxServerIDLength = 1 << 14
 
 // raftStoragePaths returns paths for use when raft is the storage mechanism.
 func (b *SystemBackend) raftStoragePaths() []*framework.Path {
-	return []*framework.Path{
+	return append(b.snapshotLoadPaths(), []*framework.Path{
 		{
 			Pattern: "storage/raft/bootstrap/answer",
 
@@ -246,7 +246,7 @@ func (b *SystemBackend) raftStoragePaths() []*framework.Path {
 			HelpSynopsis:    strings.TrimSpace(sysRaftHelp["raft-autopilot-configuration"][0]),
 			HelpDescription: strings.TrimSpace(sysRaftHelp["raft-autopilot-configuration"][1]),
 		},
-	}
+	}...)
 }
 
 func (b *SystemBackend) handleRaftConfigurationGet() framework.OperationFunc {

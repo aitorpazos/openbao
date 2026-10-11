@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: MPL-2.0
+api: raft_snapshot_load
+# Vault Enterprise-compatible Raft snapshot-load: load/list/read/unload of
+# an isolated recovery snapshot. Derived from the public Vault API
+# documentation:
+#   https://developer.hashicorp.com/vault/api-docs/system/storage/raftsnapshotload
+#   Page version label: v2.x (latest). Enterprise-gated on that page.
+#
+# Documented surface (v2.x):
+#   POST  /sys/storage/raft/snapshot-load        binary body; "Load a new
+#     snapshot into the Vault cluster without overwriting the cluster with
+#     the snapshot's data." Sample response fields: cluster_id,
+#     created_at, expires_at, snapshot_id, status ("loading" in the sample).
+#   LIST  /sys/storage/raft/snapshot-load        {data: {keys: [id...]}}
+#   GET   /sys/storage/raft/snapshot-load/:snapshot_id  status details;
+#     status "ready" in the sample. A snapshot loaded from an Automated
+#     Snapshot configuration additionally carries auto_config_name and url.
+#   DELETE /sys/storage/raft/snapshot-load/:snapshot_id?force=bool  unload.
+#
+# Documented restrictions:
+#   - Snapshot must be from the same cluster and have the same unseal keys.
+#   - Only one snapshot may be loaded at a time.
+#   - Automatic unload 72 hours after loading.
+#   - Active-node change -> status "error"; unload/reload required.
+#   - Not loadable while mlock is enabled. OpenBao dropped mlock support
+#     entirely (internal/helper/configutil/config.go mlockMsg), so this
+#     restriction is inherently satisfied.
+#
+# Harness limits: the binary success path (real snapshot upload, isolated
+# view contents, cross-cluster rejection) is exercised by the Go end-to-end
+# tests TestRaft_SnapshotLoad / TestRaft_SnapshotLoad_CrossCluster in
+# internal/vault/external_tests/raft/snapshot_load_test.go, because the
+# harness cannot fabricate a valid sealed snapshot. Error-message wording
+# below is asserted loosely because Vault's exact wording is undocumented;
+# on non-raft storage (dev mode) the storage check fires first.
+feature: raft-snapshot-load
+source: https://developer.hashicorp.com/vault/api-docs/system/storage/raftsnapshotload
+source_version: v2.x (latest)
+
+cases:
+  - id: list-empty
+    request:
+      method: LIST
+      path: /v1/sys/storage/raft/snapshot-load
+    expect:
+      # Vault LIST convention: an empty list returns 404 (respondErrorCommon,
+      # "consistency with GET"); a loaded snapshot returns 200 with data.keys.
+      # The empty-cluster body carries no data property, so only status is
+      # asserted here; the 200 shape is exercised by the Go e2e test.
+      status: [200, 404]
+
+  - id: post-empty-body
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-load
+    expect:
+      status: 400
+
+  - id: post-garbage-body
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-load
+      body_raw: bm90IGEgcmVhbCBzbmFwc2hvdA==
+    expect:
+      status: 400
+
+  - id: get-unknown
+    request:
+      method: GET
+      path: /v1/sys/storage/raft/snapshot-load/00000000-0000-0000-0000-000000000000
+    expect:
+      # Not-found shape is undocumented: 200-empty, 204, or 404.
+      status: [200, 204, 404]
+
+  - id: delete-unknown
+    request:
+      method: DELETE
+      path: /v1/sys/storage/raft/snapshot-load/00000000-0000-0000-0000-000000000000
+    expect:
+      # Idempotence is undocumented: 200, 204, or 404.
+      status: [200, 204, 404]

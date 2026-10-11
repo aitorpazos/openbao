@@ -40,7 +40,8 @@ var (
 
 func isSnapshotRequest(req *http.Request) bool {
 	return req.URL.Path == "/v1/sys/storage/raft/snapshot" ||
-		req.URL.Path == "/v1/sys/storage/raft/snapshot-force"
+		req.URL.Path == "/v1/sys/storage/raft/snapshot-force" ||
+		req.URL.Path == "/v1/sys/storage/raft/snapshot-load"
 }
 
 func resetBody(req *http.Request) error {

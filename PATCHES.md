@@ -46,6 +46,12 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/identity/store.go` | +`handleLoginMFASelfEnrollUpdate` handler + path registration for `identity/mfa/method/totp/self-enroll` (requires `mfa_request_id`+`mfa_method_id`, entity-backed token, enabled method) | Documented self-enrollment endpoint; binds enrollment to the caller's unexpired pending login without consuming it | — |
 | `internal/vault/identity/mfa.go` | +`ValidateMFASelfEnrollment` (pop+re-push pending under queue lock, namespace/entity binding) + `enable_self_enrollment` on config create/read | Self-enrollment semantics: enrollment must not consume the pending login; non-entity tokens rejected | — |
 | `internal/vault/login_mfa.go` | +`enable_self_enrollment` persisted on login MFA TOTP method config (create/update/read) | Operator-visible knob enabling self-enrollment per method | — |
+| `internal/vault/logical_system_raft.go` | `raftStoragePaths()` prepends `b.snapshotLoadPaths()` (return append pattern) | Registers `/sys/storage/raft/snapshot-load` (POST/LIST/GET/DELETE) + `/sys/storage/raft/snapshot-auto/snapshot-load/:name` when raft storage is in use | — |
+| `internal/http/handler.go` | +1 route in `alwaysRedirectPaths`: `sys/storage/raft/snapshot-load` | Binary upload must not be forwarded from standbys (mirrors snapshot/snapshot-force semantics) | — |
+| `internal/http/logical.go` | +1 condition in the raw-body pass-through: `path == "sys/storage/raft/snapshot-load"` | Snapshot uploads carry binary bodies; skip JSON parsing | — |
+| `internal/http/util.go` | +1 path in `isSnapshotRequest`: `/v1/sys/storage/raft/snapshot-load` | Skip request-body buffering for binary snapshot uploads | — |
+| `compat/harness/spec.go` | +`BodyRaw` field (base64) on `Request` | Binary (non-JSON) request bodies for upload cases; cannot survive YAML/JSON round trips | — |
+| `compat/harness/main.go` | +`body_raw` handling: base64 decode, `Content-Type: application/octet-stream` | Same as above (harness execution) | — |
 
 ### Redundancy zones (compat-harness branch)
 
@@ -242,3 +248,49 @@ Key behaviors confirmed live (dev server, port 8400):
 - Namespace deletion is asynchronous (DELETE → 200
   `{"status":"in-progress"}`); a parent delete may transiently 400 until a
   child's async deletion completes (specs document and tolerate this).
+
+### Raft snapshot-load (compat-harness branch)
+
+New files (additive, port free): `internal/vault/logical_system_raft_snapshot_load.go`
+(+ tests), `internal/vault/raft_snapshot_load_notes.md`, e2e coverage in
+`internal/vault/external_tests/raft/snapshot_load_test.go`
+(`TestRaft_SnapshotLoad`, `TestRaft_SnapshotLoad_CrossCluster` — raft test
+cluster with an HTTP handler), harness `body_raw` extension, specs
+`compat/specs/snapshot-load/{00-crud,10-autoload}.yaml` (9 cases, all PASS live
+on a raft-backed server).
+
+Surface (developer.hashicorp.com/vault/api-docs/system/storage/raftsnapshotload,
+v2.x (latest)): POST `/sys/storage/raft/snapshot-load` (binary body,
+acknowledgement response `{cluster_id, created_at, expires_at, snapshot_id,
+status: "loading"}`), LIST (empty → 404 per the common Vault LIST convention;
+non-empty → 200 `data.keys`), GET `/:snapshot_id` (`status: "ready"` when
+usable; `auto_config_name`/`url` present for autoload-loaded snapshots),
+DELETE `/:snapshot_id?force=` (accepted; nothing to force past while
+recoveries are local-only). POST
+`/sys/storage/raft/snapshot-auto/snapshot-load/:name` loads by URL from an
+automated-snapshot configuration; documented sample response
+`{auto_config_name, cluster_id, expires_at, snapshot_id, url, status: "ready"}`.
+
+Semantics: the load builds an isolated barrier view from the snapshot's
+ciphertext (unseals with the snapshot's own keyring), verifies same-cluster +
+same-unseal-keys, and NEVER touches live data; one snapshot at a time; 72h
+auto-unload; active-node change invalidates the view (`status` → `error`) and
+requires unload/reload; root namespace only; gzip bounds validation before
+extraction; 1 GiB upload cap; fetched-URL loads use the same pipeline
+(HTTP(S) fetch, bounded like uploads).
+
+Deviations/limits (documented in `raft_snapshot_load_notes.md`):
+
+- The "recover, read, and list individual pieces of data" operations described
+  on the snapshot-load docs page are not exposed in the API reference; only
+  load/list/read/unload are specced. The isolated view is an internal
+  approximation.
+- mlock restriction is inherently satisfied: OpenBao dropped mlock entirely
+  (configutil mlockMsg).
+- `snapshot-auto/snapshot-load/:name` fetches by HTTP(S) URL; cloud-native URL
+  schemes and storage-side credentials are deferred (cloud storage configs are
+  rejected at creation time, so only the documented negative paths are
+  reachable today: unknown config, local-storage prohibition, missing `url`).
+- Restoring the snapshot into live storage remains the separate, documented
+  `snapshot-force` surface; not reused here (docs say snapshot-load loads
+  without overwriting).

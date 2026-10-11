@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -62,7 +63,15 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 func runCase(client *http.Client, target, token, capturedToken, feature string, c Case) (string, int, string, string) {
 	captured := ""
 	var payload []byte
-	if c.Request.Body.Kind != 0 {
+	if c.Request.BodyRaw != "" {
+		// Raw (non-JSON) body: base64-decoded, sent as octet-stream. Binary
+		// uploads such as raft snapshots cannot survive YAML/JSON round trips.
+		raw, err := base64.StdEncoding.DecodeString(c.Request.BodyRaw)
+		if err != nil {
+			return "ERROR", 0, err.Error(), captured
+		}
+		payload = raw
+	} else if c.Request.Body.Kind != 0 {
 		var v any
 		if err := c.Request.Body.Decode(&v); err != nil {
 			return "ERROR", 0, err.Error(), captured
@@ -82,6 +91,9 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 		if c.Request.Method == http.MethodPatch {
 			req.Header.Set("Content-Type", "application/merge-patch+json")
 		}
+	}
+	if c.Request.BodyRaw != "" {
+		req.Header.Set("Content-Type", "application/octet-stream")
 	}
 	for k, v := range c.Request.Headers {
 		req.Header.Set(k, v)

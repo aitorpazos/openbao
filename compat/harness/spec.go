@@ -45,6 +45,11 @@ type Request struct {
 	Path    string            `yaml:"path"`
 	Body    yaml.Node         `yaml:"body"`
 	Headers map[string]string `yaml:"headers"`
+	// BodyRaw sends a raw (non-JSON) request body, base64-encoded. Binary
+	// uploads such as raft snapshots cannot survive YAML/JSON round trips.
+	// When set, Body must be null and the request is sent with
+	// Content-Type: application/octet-stream.
+	BodyRaw string `yaml:"body_raw"`
 }
 type Expect struct {
 	Status Statuses       `yaml:"status"`

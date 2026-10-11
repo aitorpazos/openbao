@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MPL-2.0
+api: raft_snapshot_autoload
+# Vault Enterprise snapshot-auto/snapshot-load: loading a snapshot from an
+# Automated Snapshot configuration by URL. Derived from the public Vault API
+# documentation:
+#   https://developer.hashicorp.com/vault/api-docs/system/storage/raftautosnapshots
+#   Page version label: v2.x (latest). Enterprise-gated on that page.
+#
+# Documented surface (v2.x):
+#   POST /sys/storage/raft/snapshot-auto/snapshot-load/:name
+#     name (required): name of the configuration that created the snapshot.
+#     url (required): the snapshot URL to load, as returned by the status
+#       endpoint.
+#     Response: {auto_config_name, cluster_id, expires_at, snapshot_id,
+#     url, status}. status "ready" in the sample (already terminal).
+#     Restrictions: same cluster and unseal keys; one loaded at a time;
+#     automatic unload after 72 hours; active-node change -> status error;
+#     mlock precludes loading.
+#     "You cannot load a snapshot from an automated snapshot configuration
+#     with storage_type=local. Instead, upload the snapshot file using the
+#     /sys/storage/raft/snapshot-load endpoint."
+#
+# Positive cases need a real cloud-storage URL and are outside the local
+# harness; the documented negative (unknown config) and local-storage
+# rejection are asserted here. The same-shape binary upload surface is
+# covered by compat/specs/snapshot-load/00-crud.yaml. Fixture names
+# compat-snap-load* with unconditional cleanup.
+feature: raft-snapshot-autoload
+source: https://developer.hashicorp.com/vault/api-docs/system/storage/raftautosnapshots
+source_version: v2.x (latest)
+
+cases:
+  - id: load-unknown-config
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/snapshot-load/compat-nonexistent
+      body: {"url": "https://example.invalid/raft.snap"}
+    expect:
+      status: 400
+
+  - id: load-local-config-create
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-load
+      body: {interval: 24h, storage_type: local, path_prefix: /tmp/compat-snap-load/, local_max_space: 10000000}
+    expect: {status: [200, 204]}
+
+  - id: load-local-config-rejected
+    depends: [load-local-config-create]
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-auto/snapshot-load/compat-snap-load
+      body: {"url": "file:///tmp/compat-nonexistent.snap"}
+    expect:
+      # Local-storage configs are prohibited as a load source; expect the
+      # request to fail (400) rather than attempt a local-file load.
+      status: 400
+
+  - id: load-cleanup
+    request:
+      method: DELETE
+      path: /v1/sys/storage/raft/snapshot-auto/config/compat-snap-load
+    expect: {status: [200, 204, 404]}
