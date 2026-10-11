@@ -1401,6 +1401,12 @@ func (i *IdentityStore) pathOIDCListRole(ctx context.Context, req *logical.Reque
 }
 
 func (i *IdentityStore) pathOIDCDiscovery(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
+	return i.oidcDiscovery(ctx, req, "")
+}
+
+// oidcDiscovery keeps each issuer's discovery document in a separate namespace-scoped
+// cache entry. All entries are invalidated with the existing OIDC configuration cache.
+func (i *IdentityStore) oidcDiscovery(ctx context.Context, req *logical.Request, issuerSuffix string) (*logical.Response, error) {
 	var data []byte
 
 	ns, err := namespace.FromContext(ctx)
@@ -1408,7 +1414,8 @@ func (i *IdentityStore) pathOIDCDiscovery(ctx context.Context, req *logical.Requ
 		return nil, err
 	}
 
-	v, ok, err := i.OidcCache.Get(ns, "discoveryResponse")
+	cacheKey := "discoveryResponse" + issuerSuffix
+	v, ok, err := i.OidcCache.Get(ns, cacheKey)
 	if err != nil {
 		return nil, err
 	}
@@ -1422,8 +1429,8 @@ func (i *IdentityStore) pathOIDCDiscovery(ctx context.Context, req *logical.Requ
 		}
 
 		disc := Discovery{
-			Issuer:        c.effectiveIssuer,
-			Keys:          c.effectiveIssuer + "/.well-known/keys",
+			Issuer:        c.effectiveIssuer + issuerSuffix,
+			Keys:          c.effectiveIssuer + issuerSuffix + "/.well-known/keys",
 			ResponseTypes: []string{"id_token"},
 			Subjects:      []string{"public"},
 			IDTokenAlgs:   SupportedAlgs,
@@ -1434,7 +1441,7 @@ func (i *IdentityStore) pathOIDCDiscovery(ctx context.Context, req *logical.Requ
 			return nil, err
 		}
 
-		if err := i.OidcCache.Set(ns, "discoveryResponse", data); err != nil {
+		if err := i.OidcCache.Set(ns, cacheKey, data); err != nil {
 			return nil, err
 		}
 	}

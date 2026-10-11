@@ -9,7 +9,10 @@ import (
 	"github.com/openbao/openbao/sdk/v2/helper/consts"
 	"github.com/openbao/openbao/sdk/v2/logical"
 	credAppRole "github.com/openbao/openbao/v2/internal/builtin/credential/approle"
+	credAws "github.com/openbao/openbao/v2/internal/builtin/credential/aws"
+	credAzure "github.com/openbao/openbao/v2/internal/builtin/credential/azure"
 	credCert "github.com/openbao/openbao/v2/internal/builtin/credential/cert"
+	credGcp "github.com/openbao/openbao/v2/internal/builtin/credential/gcp"
 	credJWT "github.com/openbao/openbao/v2/internal/builtin/credential/jwt"
 	credKube "github.com/openbao/openbao/v2/internal/builtin/credential/kubernetes"
 	credLdap "github.com/openbao/openbao/v2/internal/builtin/credential/ldap"
@@ -19,6 +22,9 @@ import (
 	dbMysql "github.com/openbao/openbao/v2/internal/builtin/database/mysql"
 	dbPostgres "github.com/openbao/openbao/v2/internal/builtin/database/postgresql"
 	dbValkey "github.com/openbao/openbao/v2/internal/builtin/database/valkey"
+	logicalAws "github.com/openbao/openbao/v2/internal/builtin/logical/aws"
+	logicalAzure "github.com/openbao/openbao/v2/internal/builtin/logical/azure"
+	logicalGcp "github.com/openbao/openbao/v2/internal/builtin/logical/gcp"
 	logicalKube "github.com/openbao/openbao/v2/internal/builtin/logical/kubernetes"
 	logicalKv "github.com/openbao/openbao/v2/internal/builtin/logical/kv"
 	logicalPki "github.com/openbao/openbao/v2/internal/builtin/logical/pki"
@@ -62,6 +68,9 @@ func newRegistry() *registry {
 			"jwt":        {Factory: credJWT.Factory},
 			"kubernetes": {Factory: credKube.Factory},
 			"ldap":       {Factory: credLdap.Factory},
+			"aws":        {Factory: credAws.Factory},
+			"azure":      {Factory: credAzure.Factory},
+			"gcp":        {Factory: credGcp.Factory},
 			"oidc":       {Factory: credJWT.Factory},
 			"userpass":   {Factory: credUserpass.Factory},
 		},
@@ -83,6 +92,9 @@ func newRegistry() *registry {
 			"kubernetes": {Factory: logicalKube.Factory},
 			"kv":         {Factory: logicalKv.Factory},
 			"ldap":       {Factory: credLdap.SecretsFactory},
+			"aws":        {Factory: logicalAws.Factory},
+			"azure":      {Factory: logicalAzure.Factory},
+			"gcp":        {Factory: logicalGcp.Factory},
 			"pki":        {Factory: logicalPki.Factory},
 			"rabbitmq":   {Factory: logicalRabbit.Factory},
 			"ssh":        {Factory: logicalSsh.Factory},

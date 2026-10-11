@@ -304,6 +304,8 @@ func (b *backend) migration(ctx context.Context, r *logical.Request, d *framewor
 	if len(keys) > 0 {
 		return rejectRemote(ctx, r, d)
 	}
-	// No legacy roles exist on an empty mount; do not fabricate a migration job.
-	return nil, nil
+	// No legacy roles exist on an empty mount; report the empty migration
+	// status rather than returning a nil response (which the HTTP layer
+	// renders as 404 for reads).
+	return &logical.Response{Data: map[string]interface{}{}}, nil
 }

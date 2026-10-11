@@ -101,6 +101,8 @@ func NewIdentityStore(ctx context.Context, identityStoreConfig *IdentityStoreCon
 			Unauthenticated: []string{
 				"scim/v2/ServiceProviderConfig",
 				"oidc/.well-known/*",
+				"oidc/plugins/.well-known/*",
+				"oidc/secrets-sync/.well-known/*",
 				"oidc/provider/+/.well-known/*",
 				"oidc/provider/+/token",
 			},
@@ -301,6 +303,7 @@ func (i *IdentityStore) paths() []*framework.Path {
 		lookupPaths(i),
 		upgradePaths(i),
 		oidcPaths(i),
+		oidcWorkloadPaths(i),
 		oidcProviderPaths(i),
 		mfaPaths(i),
 		scimPaths(i),
