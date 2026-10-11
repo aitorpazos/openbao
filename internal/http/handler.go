@@ -95,6 +95,9 @@ var (
 		"/v1/sys/remount",
 		"/v1/sys/rotate",
 		"/v1/sys/rotate/keyring",
+		// The documented Enterprise autopilot-state shape is a top-level
+		// payload (see compat/specs/redundancy/notes.md, AUTO).
+		"/v1/sys/storage/raft/autopilot/state",
 		"/v1/sys/wrapping/wrap",
 	}
 

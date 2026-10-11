@@ -4652,9 +4652,13 @@ func (b *SystemBackend) handleHAStatus(ctx context.Context, req *logical.Request
 	}
 
 	// Preserve the legacy entries while exposing the documented Enterprise shape.
+	// Each node's redundancy_zone comes from its own autopilot_redundancy_zone
+	// configuration; the active node learned peers' labels over the echo channel.
+	// Empty for unconfigured nodes and non-raft clusters.
+	zones := b.Core.getRedundancyZones()
 	compatNodes := make([]haStatusCompatNode, len(nodes))
 	for i, node := range nodes {
-		compatNodes[i] = haStatusCompatNode{HAStatusNode: node}
+		compatNodes[i] = haStatusCompatNode{HAStatusNode: node, RedundancyZone: zones[node.APIAddress]}
 	}
 
 	return &logical.Response{
@@ -4666,8 +4670,9 @@ func (b *SystemBackend) handleHAStatus(ctx context.Context, req *logical.Request
 }
 
 // haStatusCompatNode adds redundancy_zone only to the capitalized Nodes array.
-// OpenBao's Raft LocalNodeConfigValue has no redundancy-zone metadata, so the
-// zone remains an explicit empty string for both Raft and non-Raft nodes.
+// The label is each node's own autopilot_redundancy_zone raft-storage setting;
+// the active node learns peers' labels over the echo channel. Empty for
+// unconfigured nodes and non-raft clusters.
 type haStatusCompatNode struct {
 	HAStatusNode
 	RedundancyZone string `json:"redundancy_zone"`

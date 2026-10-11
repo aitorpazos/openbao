@@ -25,6 +25,9 @@ message EchoRequest {
 	string raft_desired_suffrage = 8;
 	string raft_upgrade_version = 9;
 	string sdk_version = 11;
+	// RaftRedundancyZone carries the sender's autopilot_redundancy_zone label
+	// (storage "raft" stanza) so the active node can report cluster-wide zones.
+	string raft_redundancy_zone = 12;
 }
 
 message EchoReply {

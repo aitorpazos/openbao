@@ -204,6 +204,11 @@ type RaftBackend struct {
 	// node is up and running.
 	disableAutopilot bool
 
+	// redundancyZone is this node's autopilot redundancy-zone label, set from
+	// the autopilot_redundancy_zone key in the storage "raft" stanza. Empty
+	// (the default) means the node is not assigned to a zone.
+	redundancyZone string
+
 	// autopilotReconcileInterval is how long between rounds of performing promotions, demotions
 	// and leadership transfers.
 	autopilotReconcileInterval time.Duration
@@ -547,6 +552,11 @@ func NewRaftBackend(conf map[string]string, logger log.Logger) (physical.Backend
 		}
 	}
 
+	// Documented Enterprise parameter (default ""): the operator-chosen
+	// redundancy-zone label for this node. Any non-empty string is accepted;
+	// the label's meaning is purely operator-defined.
+	redundancyZone := conf["autopilot_redundancy_zone"]
+
 	var nonVoter bool
 	if v := api.ReadBaoVariable(EnvVaultRaftNonVoter); v != "" {
 		// Consistent with handling of other raft boolean env vars
@@ -582,6 +592,7 @@ func NewRaftBackend(conf map[string]string, logger log.Logger) (physical.Backend
 		autopilotUpdateInterval:    updateInterval,
 		nonVoter:                   nonVoter,
 		upgradeVersion:             upgradeVersion,
+		redundancyZone:             redundancyZone,
 	}, nil
 }
 
@@ -659,6 +670,14 @@ func (b *RaftBackend) EffectiveVersion() string {
 	}
 
 	return version.GetVersion().Version
+}
+
+// RedundancyZone returns this node's autopilot redundancy-zone label
+// (autopilot_redundancy_zone from the storage "raft" stanza). Empty when unset.
+func (b *RaftBackend) RedundancyZone() string {
+	b.l.RLock()
+	defer b.l.RUnlock()
+	return b.redundancyZone
 }
 
 func (b *RaftBackend) CollectMetrics(sink *metricsutil.ClusterMetricSink) {

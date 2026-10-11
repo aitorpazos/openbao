@@ -78,6 +78,7 @@ type NodeHAConnectionInfo struct {
 	LastHeartbeat  time.Time
 	Version        string
 	UpgradeVersion string
+	RedundancyZone string
 }
 
 func (s *forwardedRequestRPCServer) Echo(ctx context.Context, in *EchoRequest) (*EchoReply, error) {
@@ -86,6 +87,7 @@ func (s *forwardedRequestRPCServer) Echo(ctx context.Context, in *EchoRequest) (
 		LastHeartbeat:  time.Now(),
 		Version:        in.SdkVersion,
 		UpgradeVersion: in.RaftUpgradeVersion,
+		RedundancyZone: in.RaftRedundancyZone,
 	}
 	if in.ClusterAddr != "" {
 		s.clusterPeerClusterAddrsCache.Set(in.ClusterAddr, incomingNodeConnectionInfo)
@@ -99,6 +101,7 @@ func (s *forwardedRequestRPCServer) Echo(ctx context.Context, in *EchoRequest) (
 			DesiredSuffrage: in.RaftDesiredSuffrage,
 			SDKVersion:      in.SdkVersion,
 			UpgradeVersion:  in.RaftUpgradeVersion,
+			RedundancyZone:  in.RaftRedundancyZone,
 		})
 	}
 
@@ -251,6 +254,7 @@ func (c *Client) Start() {
 				req.RaftTerm = raftBackend.Term()
 				req.RaftDesiredSuffrage = raftBackend.DesiredSuffrage()
 				req.RaftUpgradeVersion = raftBackend.EffectiveVersion()
+				req.RaftRedundancyZone = raftBackend.RedundancyZone()
 				labels = append(labels, metrics.Label{Name: "peer_id", Value: raftBackend.NodeID()})
 			}
 

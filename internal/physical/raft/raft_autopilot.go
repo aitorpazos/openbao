@@ -169,6 +169,7 @@ type FollowerState struct {
 	DesiredSuffrage string
 	Version         string
 	UpgradeVersion  string
+	RedundancyZone  string
 }
 
 // EchoRequestUpdate is here to avoid 1) the list of arguments to Update() getting huge 2) an import cycle on the vault package
@@ -179,6 +180,18 @@ type EchoRequestUpdate struct {
 	DesiredSuffrage string
 	UpgradeVersion  string
 	SDKVersion      string
+	RedundancyZone  string
+}
+
+// Zone returns the redundancy zone a peer last reported over the echo
+// channel, or "" when unknown/unset.
+func (s *FollowerStates) Zone(id string) string {
+	s.l.RLock()
+	defer s.l.RUnlock()
+	if state, ok := s.followers[id]; ok {
+		return state.RedundancyZone
+	}
+	return ""
 }
 
 // FollowerStates holds information about all the followers in the raft cluster
@@ -217,6 +230,7 @@ func (s *FollowerStates) Update(req *EchoRequestUpdate) bool {
 	state.LastHeartbeat = time.Now()
 	state.Version = req.SDKVersion
 	state.UpgradeVersion = req.UpgradeVersion
+	state.RedundancyZone = req.RedundancyZone
 
 	return !present
 }
@@ -384,7 +398,8 @@ type AutopilotState struct {
 	Voters                     []string                    `json:"voters" mapstructure:"voters"`
 	NonVoters                  []string                    `json:"non_voters,omitempty" mapstructure:"non_voters,omitempty"`
 	Upgrade                    *AutopilotUpgrade           `json:"upgrade_info,omitempty" mapstructure:"upgrade_info,omitempty"`
-	OptimisticFailureTolerance int                         `json:"optimistic_failure_tolerance,omitempty" mapstructure:"optimistic_failure_tolerance,omitempty"`
+	OptimisticFailureTolerance int                         `json:"optimistic_failure_tolerance" mapstructure:"optimistic_failure_tolerance"`
+	RedundancyZones            map[string]*AutopilotZone   `json:"redundancy_zones,omitempty" mapstructure:"redundancy_zones,omitempty"`
 }
 
 // AutopilotServer represents the health information of individual server node
@@ -550,7 +565,35 @@ func (b *RaftBackend) GetAutopilotServerState(ctx context.Context) (*AutopilotSt
 		return nil, nil
 	}
 
-	return autopilotToAPIState(apState)
+	apiState, err := autopilotToAPIState(apState)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decorate with the documented Enterprise redundancy-zone surfaces. We
+	// already hold b.l for reading, so resolve zones without re-locking the
+	// backend (nested RLock can deadlock against a waiting writer).
+	zoneOf := func(id raft.ServerID) string {
+		if string(id) == b.localID {
+			return b.redundancyZone
+		}
+		if b.followerStates != nil {
+			return b.followerStates.Zone(string(id))
+		}
+		return ""
+	}
+	zones, oft, nodeTypes := zonesFromAutopilotState(apState, zoneOf)
+	apiState.OptimisticFailureTolerance = oft
+	if len(zones) > 0 {
+		apiState.RedundancyZones = zones
+		for id, nodeType := range nodeTypes {
+			if srv, ok := apiState.Servers[string(id)]; ok {
+				srv.NodeType = nodeType
+			}
+		}
+	}
+
+	return apiState, nil
 }
 
 func (b *RaftBackend) DisableAutopilot() {
@@ -585,7 +628,7 @@ func (b *RaftBackend) SetupAutopilot(ctx context.Context, storageConfig *Autopil
 	// Create the autopilot instance
 	options := []autopilot.Option{
 		autopilot.WithLogger(b.logger),
-		autopilot.WithPromoter(&CustomPromoter{}),
+		autopilot.WithPromoter(&CustomPromoter{zoneOf: b.zoneResolver()}),
 	}
 	if b.autopilotReconcileInterval != 0 {
 		options = append(options, autopilot.WithReconcileInterval(b.autopilotReconcileInterval))
