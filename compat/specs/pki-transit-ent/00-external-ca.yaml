@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: MPL-2.0
+api: pki-external-ca-configuration
+feature: pki-transit-ent
+source: https://developer.hashicorp.com/vault/api-docs/secret/pki-external-ca
+source_version: "v2.x (latest)"
+notes: |
+  Sections: ACME account management, Role management, DNS provider configuration,
+  DNS provider testing, and List recent orders. Mount lifecycle is documented at
+  https://developer.hashicorp.com/vault/api-docs/system/mounts; status/errors at
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and #error-response.
+  All sources v2.x (latest). Requires licensed disposable target, administrative
+  token and registered pki-external-ca plugin. compat-pkica-external MUST be absent
+  initially; cleanup unconditionally removes only this reserved mount.
+  No successful ACME registration, cloud access or DNS updates are attempted.
+  RFC2136 CRUD stores a dummy TSIG secret and loopback nameserver; it does not call
+  dns/test/workflow. Block outbound networking as an additional safety precaution.
+  Real account/order/role lifecycle requires an external ACME fixture; see notes.md.
+cases:
+  - id: mount-enable
+    request: {method: POST, path: /v1/sys/mounts/compat-pkica-external, body: {type: pki-external-ca}}
+    expect: {status: [200, 204]}
+  - id: account-missing-directory
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-external/config/acme-account/compat-pkica-invalid
+      body: {email_contacts: [compat-pkica@example.invalid]}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: account-import-missing-key-and-directory
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-pkica-external/config/acme-account/compat-pkica-invalid/import, body: {}}
+    expect: *invalid
+  - id: accounts-empty
+    depends: [account-missing-directory, account-import-missing-key-and-directory]
+    request: {method: LIST, path: /v1/compat-pkica-external/config/acme-account}
+    expect: {status: 404}
+  - id: role-missing-account
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-external/role/compat-pkica-invalid
+      body: {allowed_domains: [example.invalid]}
+    expect: *invalid
+  - id: roles-empty
+    depends: [role-missing-account]
+    request: {method: LIST, path: /v1/compat-pkica-external/role}
+    expect: {status: 404}
+  - id: route53-missing-identifiers
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-pkica-external/config/dns/aws-route53/compat-pkica-invalid, body: {}}
+    expect: *invalid
+  - id: azure-missing-identifiers
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-pkica-external/config/dns/azure-dns/compat-pkica-invalid, body: {}}
+    expect: *invalid
+  - id: google-missing-identifiers
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-pkica-external/config/dns/google-cloud-dns/compat-pkica-invalid, body: {}}
+    expect: *invalid
+  - id: rfc2136-missing-required-fields
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-pkica-external/config/dns/rfc2136/compat-pkica-invalid, body: {}}
+    expect: *invalid
+  - id: rfc2136-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-external/config/dns/rfc2136/compat-pkica-dns
+      body: &dns
+        identifiers: [example.invalid]
+        nameserver: "127.0.0.1:1"
+        tsig_key_name: compat-pkica-dummy
+        tsig_secret: c29tZS1iYXNlNjQtZW5jb2RlZC1zZWNyZXQ=
+        tsig_algorithm: hmac-sha256
+        ttl: 60s
+    expect:
+      status: 200
+      exact: {data.name: compat-pkica-dns, data.type: rfc2136, data.ttl: 60}
+      body_schema: &dns-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [name, type, identifiers, nameserver, tsig_key_name, tsig_algorithm, ttl, creation_date, last_updated_date]
+            properties:
+              name: {type: string}
+              type: {type: string}
+              identifiers: {type: array, items: {type: string}}
+              nameserver: {type: string}
+              tsig_key_name: {type: string}
+              tsig_algorithm: {type: string}
+              ttl: {type: integer}
+              creation_date: {type: string}
+              last_updated_date: {type: string}
+  - id: rfc2136-read
+    depends: [rfc2136-create]
+    request: {method: GET, path: /v1/compat-pkica-external/config/dns/rfc2136/compat-pkica-dns}
+    expect:
+      status: 200
+      body_schema: *dns-schema
+      exact:
+        data.identifiers: [example.invalid]
+        data.nameserver: "127.0.0.1:1"
+        data.tsig_algorithm: hmac-sha256
+        data.ttl: 60
+  - id: rfc2136-list
+    depends: [rfc2136-create]
+    request: {method: LIST, path: /v1/compat-pkica-external/config/dns/rfc2136}
+    expect: {status: 200, contains: {data.keys: [compat-pkica-dns]}}
+  - id: dns-list-all
+    depends: [rfc2136-create]
+    request: {method: LIST, path: /v1/compat-pkica-external/config/dns}
+    expect:
+      status: 200
+      contains: {data.keys: [rfc2136/compat-pkica-dns]}
+      exact:
+        data.key_info.rfc2136/compat-pkica-dns.name: compat-pkica-dns
+        data.key_info.rfc2136/compat-pkica-dns.type: rfc2136
+  - id: rfc2136-update
+    depends: [rfc2136-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-external/config/dns/rfc2136/compat-pkica-dns
+      body: {<<: *dns, ttl: 120s, tsig_algorithm: hmac-sha512}
+    expect: {status: 200, exact: {data.ttl: 120, data.tsig_algorithm: hmac-sha512}}
+  - id: rfc2136-read-updated
+    depends: [rfc2136-update]
+    request: {method: GET, path: /v1/compat-pkica-external/config/dns/rfc2136/compat-pkica-dns}
+    expect: {status: 200, exact: {data.ttl: 120, data.tsig_algorithm: hmac-sha512}}
+  - id: rfc2136-delete
+    depends: [rfc2136-create]
+    request: {method: DELETE, path: /v1/compat-pkica-external/config/dns/rfc2136/compat-pkica-dns}
+    expect: {status: [200, 204]}
+  - id: rfc2136-list-empty
+    depends: [rfc2136-delete]
+    request: {method: LIST, path: /v1/compat-pkica-external/config/dns/rfc2136}
+    expect: {status: 404}
+  - id: recent-orders-below-minimum
+    depends: [mount-enable]
+    request: {method: LIST, path: '/v1/compat-pkica-external/lookup/orders/recent?within=30m'}
+    expect: *invalid
+  - id: recent-orders-above-maximum
+    depends: [mount-enable]
+    request: {method: LIST, path: '/v1/compat-pkica-external/lookup/orders/recent?within=169h'}
+    expect: *invalid
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-external}
+    expect: {status: [200, 204]}

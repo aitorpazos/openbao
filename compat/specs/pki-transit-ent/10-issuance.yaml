@@ -1,0 +1,296 @@
+# SPDX-License-Identifier: MPL-2.0
+api: pki-enterprise-issuance-and-policy-configuration
+feature: pki-transit-ent
+source: https://developer.hashicorp.com/vault/api-docs/secret/pki/issuance
+source_version: "v2.x (latest)"
+notes: |
+  Protocol sections: EST, CMPv2, SCEP, ACME directories/configuration.
+  CIEPS, metadata role option, managed keys, and export-key management source:
+  https://developer.hashicorp.com/vault/api-docs/secret/pki (v2.x (latest)).
+  Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/mounts.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources v2.x (latest).
+  Licensed disposable target, administrative token. compat-pkica-issuance MUST
+  be absent initially. Cleanup removes that mount unconditionally. No global EST
+  default mount or labels are registered. Protocols remain disabled, no auth
+  delegation, issuer, external policy server or actual enrollment is required.
+  ACME disabled external-policy discovery is the only protocol status asserted:
+  the docs explicitly guarantee 404 when ACME is disabled. A 404 here alone is
+  NOT evidence of Enterprise support. EST cacerts/CMP/SCEP wire shapes are gaps.
+  SCEP log-level checks supplement existing auth-os-saml/10-scep.yaml coverage.
+  Export keys stay in the disposable mount; no CA private key is exported.
+cases:
+  - id: mount-enable
+    request: {method: POST, path: /v1/sys/mounts/compat-pkica-issuance, body: {type: pki}}
+    expect: {status: [200, 204]}
+  - id: est-invalid-audit-field
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/est
+      body: {enabled: false, default_mount: false, default_path_policy: sign-verbatim, audit_fields: [compat-pkica-invalid]}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: est-configure-disabled
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/est
+      body: &est
+        enabled: false
+        default_mount: false
+        default_path_policy: sign-verbatim
+        enable_sentinel_parsing: true
+        audit_fields: [common_name, alt_names]
+    expect:
+      status: 200
+      exact: {data.enabled: false, data.default_mount: false, data.default_path_policy: sign-verbatim}
+      body_schema: &config-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [enabled, default_path_policy, last_updated]
+            properties:
+              enabled: {type: boolean}
+              default_path_policy: {type: string}
+              last_updated: {type: string}
+  - id: est-read
+    depends: [est-configure-disabled]
+    request: {method: GET, path: /v1/compat-pkica-issuance/config/est}
+    expect:
+      status: 200
+      body_schema: *config-schema
+      exact:
+        data.enabled: false
+        data.default_mount: false
+        data.enable_sentinel_parsing: true
+        data.audit_fields: [common_name, alt_names]
+  - id: est-update
+    depends: [est-configure-disabled]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/est
+      body: {<<: *est, enable_sentinel_parsing: false, audit_fields: [common_name]}
+    expect: {status: 200, exact: {data.enable_sentinel_parsing: false}}
+  - id: est-read-updated
+    depends: [est-update]
+    request: {method: GET, path: /v1/compat-pkica-issuance/config/est}
+    expect: {status: 200, exact: {data.enabled: false, data.enable_sentinel_parsing: false, data.audit_fields: [common_name]}}
+  - id: cmp-invalid-path-policy
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/cmp
+      body: {enabled: false, default_path_policy: compat-pkica-invalid}
+    expect: *invalid
+  - id: cmp-invalid-disabled-validation
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/cmp
+      body: {enabled: false, default_path_policy: sign-verbatim, disabled_validations: [compat-pkica-invalid]}
+    expect: *invalid
+  - id: cmp-configure-disabled
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/cmp
+      body: &cmp
+        enabled: false
+        default_path_policy: sign-verbatim
+        enable_sentinel_parsing: true
+        audit_fields: [common_name, uri_sans]
+        disabled_validations: []
+    expect:
+      status: 200
+      body_schema: *config-schema
+      exact: {data.enabled: false, data.default_path_policy: sign-verbatim, data.disabled_validations: []}
+  - id: cmp-read
+    depends: [cmp-configure-disabled]
+    request: {method: GET, path: /v1/compat-pkica-issuance/config/cmp}
+    expect:
+      status: 200
+      exact:
+        data.enabled: false
+        data.default_path_policy: sign-verbatim
+        data.enable_sentinel_parsing: true
+        data.audit_fields: [common_name, uri_sans]
+        data.disabled_validations: []
+  - id: cmp-update
+    depends: [cmp-configure-disabled]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/cmp
+      body: {<<: *cmp, enable_sentinel_parsing: false, audit_fields: [common_name]}
+    expect: {status: 200, exact: {data.enable_sentinel_parsing: false}}
+  - id: cmp-read-updated
+    depends: [cmp-update]
+    request: {method: GET, path: /v1/compat-pkica-issuance/config/cmp}
+    expect: {status: 200, exact: {data.enabled: false, data.enable_sentinel_parsing: false, data.audit_fields: [common_name]}}
+  - id: scep-invalid-log-level
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/scep
+      body: {enabled: false, default_path_policy: sign-verbatim, log_level: compat-pkica-invalid}
+    expect: *invalid
+  - id: scep-configure-log-level
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/scep
+      body: {enabled: false, default_path_policy: sign-verbatim, log_level: WARN}
+    expect: {status: 200, exact: {data.enabled: false}}
+  - id: scep-read-log-level
+    depends: [scep-configure-log-level]
+    request: {method: GET, path: /v1/compat-pkica-issuance/config/scep}
+    expect: {status: 200, body_schema: *config-schema, exact: {data.enabled: false, data.log_level: WARN}}
+  - id: scep-reset-log-level
+    depends: [scep-configure-log-level]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/scep
+      body: {enabled: false, default_path_policy: sign-verbatim, log_level: ''}
+    expect: {status: 200}
+  - id: scep-read-reset
+    depends: [scep-reset-log-level]
+    request: {method: GET, path: /v1/compat-pkica-issuance/config/scep}
+    expect: {status: 200, exact: {data.enabled: false, data.log_level: ''}}
+  - id: acme-disable
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-pkica-issuance/config/acme, body: {enabled: false}}
+    expect: {status: 200, exact: {data.enabled: false}}
+  - id: acme-external-policy-directory-disabled
+    depends: [acme-disable]
+    request: {method: GET, path: /v1/compat-pkica-issuance/external-policy/compat-pkica-policy/acme/directory}
+    expect: {status: 404}
+  - id: cieps-read-default
+    depends: [mount-enable]
+    request: {method: GET, path: /v1/compat-pkica-issuance/config/external-policy}
+    expect:
+      status: 200
+      exact: {data.enabled: false, data.external_service_url: '', data.external_service_validated: false}
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [enabled, external_service_url, external_service_last_updated, external_service_validated, last_successful_request, timeout]
+            properties:
+              enabled: {type: boolean}
+              external_service_url: {type: string}
+              external_service_last_updated: {type: string}
+              external_service_validated: {type: boolean}
+              last_successful_request: {type: string}
+              timeout: {type: integer}
+  - id: cieps-reject-insecure-url
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/external-policy
+      body: {enabled: true, external_service_url: 'http://127.0.0.1:1'}
+    expect: *invalid
+  - id: cieps-reject-missing-trust
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/config/external-policy
+      body: {enabled: true, external_service_url: 'https://127.0.0.1:1'}
+    expect: *invalid
+  - id: metadata-role-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/roles/compat-pkica-metadata
+      body: {no_store: true, no_store_metadata: false}
+    expect: {status: [200, 204]}
+  - id: metadata-storage-independent-of-cert-storage
+    depends: [metadata-role-create]
+    request: {method: GET, path: /v1/compat-pkica-issuance/roles/compat-pkica-metadata}
+    expect: {status: 200, exact: {data.no_store: true, data.no_store_metadata: false}}
+  - id: metadata-role-disable-storage
+    depends: [metadata-role-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/roles/compat-pkica-metadata
+      body: {no_store: true, no_store_metadata: true}
+    expect: {status: [200, 204]}
+  - id: metadata-role-read-updated
+    depends: [metadata-role-disable-storage]
+    request: {method: GET, path: /v1/compat-pkica-issuance/roles/compat-pkica-metadata}
+    expect: {status: 200, exact: {data.no_store: true, data.no_store_metadata: true}}
+  - id: managed-root-missing-key-reference
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/root/generate/kms
+      body: {common_name: compat-pkica-root}
+    expect: *invalid
+  - id: managed-intermediate-missing-key-reference
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/intermediate/generate/kms
+      body: {common_name: compat-pkica-intermediate}
+    expect: *invalid
+  - id: export-key-invalid-algorithm
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/export
+      body: {name: compat-pkica-invalid, key_type: compat-pkica-invalid}
+    expect: *invalid
+  - id: export-key-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/export
+      body: {name: compat-pkica-export, key_type: ec-p256}
+    expect:
+      status: 200
+      exact: {data.key_type: ec-p256}
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [export_key_uuid, key_type, public_key, export_key_hmac, created_at]
+            properties:
+              export_key_uuid: {type: string}
+              key_type: {type: string}
+              public_key: {type: string, pattern: '-----BEGIN PUBLIC KEY-----'}
+              export_key_hmac: {type: string}
+              created_at: {type: string}
+  - id: export-key-list
+    depends: [export-key-create]
+    request: {method: LIST, path: /v1/compat-pkica-issuance/export}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys, key_info]
+            properties:
+              keys: {type: array, items: {type: string}}
+              key_info: {type: object}
+  - id: export-key-duplicate-name
+    depends: [export-key-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-issuance/export
+      body: {name: compat-pkica-export, key_type: ec-p256}
+    expect: *invalid
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-issuance}
+    expect: {status: [200, 204]}

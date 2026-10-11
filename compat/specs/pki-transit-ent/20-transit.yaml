@@ -1,0 +1,338 @@
+# SPDX-License-Identifier: MPL-2.0
+api: transit-enterprise-cryptographic-extensions
+feature: pki-transit-ent
+source: https://developer.hashicorp.com/vault/api-docs/secret/transit
+source_version: "v2.x (latest)"
+notes: |
+  Sections: Create key, Read key, Export key, Encrypt data, Generate CMAC,
+  Sign data, Verify signed data, Generate random bytes, Managed keys.
+  Public-key import and base Ed25519 creation are setup for Enterprise Ed25519ph
+  verification, not a re-test of general transit functionality.
+  Mount lifecycle/entropy access: https://developer.hashicorp.com/vault/api-docs/system/mounts.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources v2.x (latest).
+  Requires a disposable licensed target with admin token; compat-transit-ent MUST
+  be absent initially. Cleanup unconditionally destroys only that reserved mount.
+  For Vault seal-source success cases configure entropy augmentation beforehand;
+  OpenBao already accepts seal/all through its random API (platform fallback).
+  These cases assert API shape, not provenance/quality of the returned entropy.
+  No managed KMS/HSM key is provisioned. Actual managed crypto is fixture-gated.
+  Ed25519ph fixture is locally generated and verified with libsodium:
+  seed bytes 00..1f, message UTF-8 'compat-transit-message', SHA-512 prehash, empty
+  signature context. Only the public key and test signature are imported/published.
+  See notes.md for OpenBao capability differences and protocol/fixture gaps.
+cases:
+  - id: mount-enable
+    request:
+      method: POST
+      path: /v1/sys/mounts/compat-transit-ent
+      body: {type: transit, external_entropy_access: true}
+    expect: {status: [200, 204]}
+  - id: managed-key-missing-reference
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-invalid, body: {type: managed_key}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: cmac128-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/keys/compat-transit-cmac128
+      body: {type: aes128-cmac, exportable: true}
+    expect: {status: [200, 204]}
+  - id: cmac128-read
+    depends: [cmac128-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-cmac128}
+    expect:
+      status: 200
+      exact: {data.name: compat-transit-cmac128, data.type: aes128-cmac, data.exportable: true}
+      body_schema: &key-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [name, type, keys]
+            properties:
+              name: {type: string}
+              type: {type: string}
+              keys: {type: object}
+  - id: cmac192-create
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-cmac192, body: {type: aes192-cmac}}
+    expect: {status: [200, 204]}
+  - id: cmac192-read
+    depends: [cmac192-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-cmac192}
+    expect: {status: 200, body_schema: *key-schema, exact: {data.type: aes192-cmac}}
+  - id: cmac256-create
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-cmac256, body: {type: aes256-cmac}}
+    expect: {status: [200, 204]}
+  - id: cmac256-read
+    depends: [cmac256-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-cmac256}
+    expect: {status: 200, body_schema: *key-schema, exact: {data.type: aes256-cmac}}
+  - id: cmac-generate
+    depends: [cmac128-create]
+    request: {method: POST, path: /v1/compat-transit-ent/cmac/compat-transit-cmac128, body: {input: aGVsbG8gd29ybGQuCg==}}
+    expect:
+      status: 200
+      body_schema: &cmac-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [cmac]
+            properties: {cmac: {type: string, pattern: '^vault:v1:.+'}}
+  - id: cmac-url-length-overrides-invalid-body-length
+    depends: [cmac128-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/cmac/compat-transit-cmac128/8
+      body: {input: aGVsbG8gd29ybGQuCg==, mac_length: 1000}
+    expect: {status: 200, body_schema: *cmac-schema}
+  - id: cmac-oversized-mac
+    depends: [cmac128-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/cmac/compat-transit-cmac128
+      body: {input: aGVsbG8gd29ybGQuCg==, mac_length: 1000}
+    expect: *invalid
+  - id: cmac-missing-input
+    depends: [cmac128-create]
+    request: {method: POST, path: /v1/compat-transit-ent/cmac/compat-transit-cmac128, body: {}}
+    expect: *invalid
+  - id: cmac-batch-shape
+    depends: [cmac128-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/cmac/compat-transit-cmac128
+      body: {batch_input: [{input: aGVsbG8gd29ybGQuCg==}, {input: aGVsbG8gd29ybGQuCg==, mac_length: 8}]}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [batch_results]
+            properties:
+              batch_results:
+                type: array
+                items:
+                  type: object
+                  required: [cmac]
+                  properties: {cmac: {type: string, pattern: '^vault:v1:.+'}}
+  - id: cmac-export
+    depends: [cmac128-create]
+    request: {method: GET, path: /v1/compat-transit-ent/export/cmac-key/compat-transit-cmac128/1}
+    expect:
+      status: 200
+      exact: {data.name: compat-transit-cmac128}
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [name, keys]
+            properties:
+              keys:
+                type: object
+                required: ['1']
+                properties: {'1': {type: string}}
+  - id: cmac-nonexportable-rejected
+    depends: [cmac256-create]
+    request: {method: GET, path: /v1/compat-transit-ent/export/cmac-key/compat-transit-cmac256}
+    expect: *invalid
+  - id: cbc128-create
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-cbc128, body: {type: aes128-cbc}}
+    expect: {status: [200, 204]}
+  - id: cbc128-read
+    depends: [cbc128-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-cbc128}
+    expect:
+      status: 200
+      body_schema: *key-schema
+      exact: {data.type: aes128-cbc, data.supports_encryption: true, data.supports_decryption: true}
+  - id: cbc128-encrypt-random-iv
+    depends: [cbc128-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/encrypt/compat-transit-cbc128
+      body: {plaintext: aGVsbG8gd29ybGQuCg==}
+    expect:
+      status: 200
+      body_schema: &ciphertext-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [ciphertext]
+            properties: {ciphertext: {type: string, pattern: '^vault:v1:.+'}}
+  - id: cbc128-invalid-iv-length
+    depends: [cbc128-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/encrypt/compat-transit-cbc128
+      body: {plaintext: aGVsbG8gd29ybGQuCg==, iv: aGVsbG8gd29ybGQuCg==}
+    expect: *invalid
+  - id: cbc256-create
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-cbc256, body: {type: aes256-cbc}}
+    expect: {status: [200, 204]}
+  - id: cbc256-read
+    depends: [cbc256-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-cbc256}
+    expect: {status: 200, body_schema: *key-schema, exact: {data.type: aes256-cbc}}
+  - id: cbc256-encrypt-random-iv
+    depends: [cbc256-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/encrypt/compat-transit-cbc256
+      body: {plaintext: aGVsbG8gd29ybGQuCg==}
+    expect: {status: 200, body_schema: *ciphertext-schema}
+  - id: mldsa-missing-parameter-set
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-invalid, body: {type: ml-dsa}}
+    expect: *invalid
+  - id: mldsa-create
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-mldsa, body: {type: ml-dsa, parameter_set: '44'}}
+    expect: {status: [200, 204]}
+  - id: mldsa-read
+    depends: [mldsa-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-mldsa}
+    expect: {status: 200, body_schema: *key-schema, exact: {data.type: ml-dsa, data.supports_signing: true}}
+  - id: hybrid-missing-algorithms
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-invalid, body: {type: hybrid, parameter_set: '44'}}
+    expect: *invalid
+  - id: hybrid-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/keys/compat-transit-hybrid
+      body: {type: hybrid, parameter_set: '44', hybrid_key_type_pqc: ml-dsa, hybrid_key_type_ec: ecdsa-p256}
+    expect: {status: [200, 204]}
+  - id: hybrid-read
+    depends: [hybrid-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-hybrid}
+    expect: {status: 200, body_schema: *key-schema, exact: {data.type: hybrid, data.supports_signing: true}}
+  - id: slhdsa-missing-parameter-set
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-invalid, body: {type: slh-dsa}}
+    expect: *invalid
+  - id: slhdsa-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/keys/compat-transit-slhdsa
+      body: {type: slh-dsa, parameter_set: slh-dsa-sha2-128s}
+    expect: {status: [200, 204]}
+  - id: slhdsa-read
+    depends: [slhdsa-create]
+    request: {method: GET, path: /v1/compat-transit-ent/keys/compat-transit-slhdsa}
+    expect: {status: 200, body_schema: *key-schema, exact: {data.type: slh-dsa, data.supports_signing: true}}
+  - id: ed25519-create
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-ed25519, body: {type: ed25519}}
+    expect: {status: [200, 204]}
+  - id: ed25519ctx-sign
+    depends: [ed25519-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/sign/compat-transit-ed25519
+      body: {input: aGVsbG8gd29ybGQuCg==, signature_context: Y29tcGF0LXRyYW5zaXQtY29udGV4dA==}
+    expect:
+      status: 200
+      body_schema: &signature-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [signature]
+            properties: {signature: {type: string, pattern: '^vault:v1:.+'}}
+  - id: ed25519ctx-reject-invalid-base64-context
+    depends: [ed25519-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/sign/compat-transit-ed25519
+      body: {input: aGVsbG8gd29ybGQuCg==, signature_context: '!!!'}
+    expect: *invalid
+  - id: ed25519ph-sign
+    depends: [ed25519-create]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/sign/compat-transit-ed25519/sha2-512
+      body:
+        input: &ph-input jpbazUleztsz7s/FeDuSw2cLkKICV0wq8ms3RcQIQqTf9RvV0Ked95r1sEbfTKHyJ15LuiLc7rn/rboY1I/IRA==
+        prehashed: true
+    expect: {status: 200, body_schema: *signature-schema}
+  - id: ed25519ph-import-public-fixture
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/keys/compat-transit-ed25519ph-fixture/import
+      body:
+        type: ed25519
+        public_key: |
+          -----BEGIN PUBLIC KEY-----
+          MCowBQYDK2VwAyEAA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=
+          -----END PUBLIC KEY-----
+    expect: {status: [200, 204]}
+  - id: ed25519ph-verify-known-signature
+    depends: [ed25519ph-import-public-fixture]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/verify/compat-transit-ed25519ph-fixture/sha2-512
+      body:
+        input: *ph-input
+        prehashed: true
+        signature: &ph-signature vault:v1:OWxzUzD4BSk7HHtmN9qHvgmuxpglqAJi5XONCUzfEyPWOz06pFH8H98tZASZgn+nxTnuFZGZtd6NY7dbvNedBQ==
+    expect: {status: 200, exact: {data.valid: true}}
+  - id: ed25519ph-wrong-context-does-not-verify
+    depends: [ed25519ph-verify-known-signature]
+    request:
+      method: POST
+      path: /v1/compat-transit-ent/verify/compat-transit-ed25519ph-fixture/sha2-512
+      body:
+        input: *ph-input
+        prehashed: true
+        signature: *ph-signature
+        signature_context: Y29tcGF0LXRyYW5zaXQtY29udGV4dA==
+    expect: {status: 200, exact: {data.valid: false}}
+  - id: random-seal-source
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/random/seal/32, body: {format: hex}}
+    expect:
+      status: 200
+      body_schema: &random-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties: {random_bytes: {type: string, pattern: '^[0-9a-f]{64}$'}}
+  - id: random-all-sources
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/random/all/32, body: {format: hex}}
+    expect: {status: 200, body_schema: *random-schema}
+  - id: random-seal-invalid-encoding
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-transit-ent/random/seal/32, body: {format: compat-transit-invalid}}
+    expect: *invalid
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-transit-ent}
+    expect: {status: [200, 204]}
