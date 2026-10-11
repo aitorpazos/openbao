@@ -91,6 +91,8 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 				"wrapping/lookup",
 				"wrapping/pubkey",
 				"replication/status",
+				"replication/performance/status",
+				"replication/dr/status",
 				"internal/specs/openapi",
 				"internal/ui/mounts",
 				"internal/ui/mounts/*",
@@ -161,6 +163,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	b.Paths = append(b.Paths, b.quotasPaths()...)
 	b.Paths = append(b.Paths, b.leaseCountPaths()...)
 	b.Paths = append(b.Paths, b.sentinelPaths()...)
+	b.Paths = append(b.Paths, b.replicationPaths()...)
 	b.Paths = append(b.Paths, b.loginMFAPaths()...)
 	b.Paths = append(b.Paths, b.namedMFAMethodPaths()...)
 	b.Paths = append(b.Paths, b.introspectionPaths()...)

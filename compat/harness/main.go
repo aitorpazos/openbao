@@ -87,7 +87,7 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 	if c.UseCapturedToken && capturedToken != "" {
 		effectiveToken = capturedToken
 	}
-	if effectiveToken != "" {
+	if effectiveToken != "" && !c.NoAuth {
 		req.Header.Set("X-Vault-Token", effectiveToken)
 	}
 	resp, err := client.Do(req)

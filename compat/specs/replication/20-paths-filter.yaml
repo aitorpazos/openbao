@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-replication-paths-filter
+feature: replication
+source: https://developer.hashicorp.com/vault/api-docs/system/replication/replication-performance
+source_version: "2.x (latest)"
+notes: >-
+  REPP: paths-filter management on a performance primary. POST sets
+  {mode: allow|deny, paths: [...]}; id is the secondary's cluster ID. GET
+  returns the filter; an unknown id returns 404 (the framework's
+  read-not-found convention); DELETE removes it. The DR surface has no paths-filter endpoints. Filters are
+  stored but not enforced until streaming exists (notes.md deviation).
+  The scenario manages its own stream lifecycle (enable/disable) so it can
+  run against a disposable target in isolation.
+cases:
+  - id: pf-enable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/enable
+    expect: {status: 204}
+  - id: pf-write
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/paths-filter/compat-secondary
+      body:
+        mode: deny
+        paths: [secret/teams/, auth/approle/*]
+    expect: {status: 204}
+  - id: pf-read
+    request: {method: GET, path: /v1/sys/replication/performance/primary/paths-filter/compat-secondary}
+    expect:
+      status: 200
+      exact:
+        data.mode: deny
+        data.paths: [secret/teams/, auth/approle/*]
+  - id: pf-write-allow-mode
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/paths-filter/compat-secondary
+      body:
+        mode: allow
+        paths: [secret/ok/]
+    expect: {status: 204}
+  - id: pf-read-allow-mode
+    request: {method: GET, path: /v1/sys/replication/performance/primary/paths-filter/compat-secondary}
+    expect:
+      status: 200
+      exact:
+        data.mode: allow
+        data.paths: [secret/ok/]
+  - id: pf-write-invalid-mode
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/paths-filter/compat-secondary
+      body:
+        mode: bogus
+        paths: [x/]
+    expect: {status: 400}
+  - id: pf-read-unknown-id
+    request: {method: GET, path: /v1/sys/replication/performance/primary/paths-filter/compat-unknown}
+    expect: {status: 404}
+  - id: pf-delete
+    request:
+      method: DELETE
+      path: /v1/sys/replication/performance/primary/paths-filter/compat-secondary
+    expect: {status: 204}
+  - id: pf-read-after-delete
+    request: {method: GET, path: /v1/sys/replication/performance/primary/paths-filter/compat-secondary}
+    expect: {status: 404}
+  - id: pf-disable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/disable
+    expect: {status: 204}

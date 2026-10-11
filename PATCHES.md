@@ -94,3 +94,38 @@ combinators all/any/not), not the full Sentinel rule language — clean-room cho
 because the language itself is not part of the documented public API surface.
 Acceptance: `compat/specs/sentinel/*` + live dev server (full enforcement spec
 green; unauth EGP denial on a userpass login path verified manually).
+
+### Replication phase 1: config/state machine, status surface, secondary activation (compat-harness branch)
+**Status:** implemented. New `internal/vault/replication.go` (per-stream
+replicationModeState persisted in barrier storage under `core/replication/{performance,dr}`
+— mode/state/cluster_id/primary_cluster_addr/secondary_id/known secondaries+primary
+addrs/last_start/paths_filters/secondary_public_key; atomic `c.replicationState` consts
+refresh wired into CreateCore + ha.go postUnseal paths) and
+`internal/vault/logical_system_replication.go` (documented `/sys/replication` surface:
+combined + typed status (unauthenticated), primary enable/demote/disable,
+secondary-token (JWT response-wrapping token with addr claim; duplicate id rejected),
+revoke-secondary, secondary enable/promote/update-primary/disable (DR ops need
+`dr_operation_token`), paths-filter CRUD (performance-only), dynamic-filter read,
+merkle-check, reindex (diff/force/skip_flush), recover, generate-public-key).
+Status shapes follow the REPP/REPD samples (mode/state/cluster_id/merkle_root/
+last_wal family/epochs as epoch-seconds strings/secondaries[]/known_* lists).
+Secondary activation: in-cluster wrapped tokens unwrap locally; JWT tokens are
+parsed for the primary's `addr` and unwrapped via POST <addr>/v1/sys/wrapping/unwrap.
+**Documented deviations (phase 1, see compat/specs/replication/notes.md):** no WAL
+streaming (secondaries do not connect; connection_status "disconnected");
+merkle_root = bounded on-demand barrier walk (undecryptable entries skipped), not an
+indexed tree; corrupted_merkle_tree always false; no data wipe on secondary enable;
+paths filters stored but not enforced; recover returns a warning; reindex recomputes
+the walk; activation JWTs not signature-verified (pubkey verification is phase 2);
+re-enabling reuses the local cluster ID.
+**Live gotchas fixed:** request handlers must NOT take c.stateLock (the request
+pipeline holds RLock for the whole request → self-deadlock; dedicated
+`c.replicationStateMut` instead); generate-public-key must not persist state when
+the stream is disabled; handler validation errors are error responses (400), not Go
+errors (500).
+Acceptance: `go test ./internal/vault -run TestReplication` green (unit: lifecycle,
+tokens/wrapping, paths-filter, DR op-token gates, merkle-check/reindex/recover,
+keypair); `compat/specs/replication/*.yaml` 57/57 PASS on a fresh dev server (harness
+extended with `no_auth` case option for the documented unauthenticated status
+endpoints); two-server cross-cluster activation verified manually (token from primary
+activates a second server; secondary reports the primary's cluster_id).

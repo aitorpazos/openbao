@@ -480,6 +480,10 @@ type Core struct {
 	// replicationState keeps the current replication state cached for quick
 	// lookup; activeNodeReplicationState stores the active value on standbys
 	replicationState           atomic.Uint32
+	// replicationStateMut serializes replication state transitions
+	// within request handlers (the request pipeline already holds
+	// c.stateLock.RLock, so handlers must not acquire it themselves).
+	replicationStateMut sync.Mutex
 	activeNodeReplicationState atomic.Uint32
 
 	// uiConfig contains UI configuration
@@ -1011,7 +1015,9 @@ func CreateCore(conf *CoreConfig) (*Core, error) {
 
 	c.SetConfig(conf.RawConfig)
 
-	c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformanceDisabled))
+	if err := c.refreshReplicationStateConsts(context.Background(), false); err != nil {
+		c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformanceDisabled))
+	}
 	c.clusterAddr.Store(conf.ClusterAddr)
 	c.SetKeyRotateGracePeriod(2 * time.Minute)
 

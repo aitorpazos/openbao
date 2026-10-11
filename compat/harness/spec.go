@@ -33,7 +33,10 @@ type Case struct {
 	CaptureToken bool `yaml:"capture_token"`
 	// UseCapturedToken sends the previously captured token instead of the
 	// run token for this case.
-	UseCapturedToken bool      `yaml:"use_captured_token"`
+	UseCapturedToken bool `yaml:"use_captured_token"`
+	// NoAuth sends the request without any X-Vault-Token header (for
+	// verifying documented unauthenticated endpoints).
+	NoAuth           bool `yaml:"no_auth"`
 	Request          Request   `yaml:"request"`
 	Expect           Expect    `yaml:"expect"`
 }

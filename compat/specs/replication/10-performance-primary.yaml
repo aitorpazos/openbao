@@ -1,0 +1,182 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-replication-performance-primary
+feature: replication
+source: https://developer.hashicorp.com/vault/api-docs/system/replication/replication-performance
+source_version: "2.x (latest)"
+notes: >-
+  REPP: primary lifecycle. enable accepts primary_cluster_addr (optional;
+  the implementation fills the local cluster address when unset);
+  demote demotes to a secondary while keeping knowledge of the cluster ID
+  (re-enable after demote is rejected until the node is promoted);
+  disable clears the stream. secondary-token requires id and returns the
+  wrapped activation token (data null, wrap_info populated); revoke-secondary
+  takes id. Statuses are root-namespace restricted; the docs mark these
+  endpoints as Enterprise-only. The secondary id must be unique.
+cases:
+  - id: perf-token-before-enable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/secondary-token
+      body: {id: compat-secondary}
+    expect: {status: 400}
+  - id: perf-revoke-before-enable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/revoke-secondary
+      body: {id: compat-secondary}
+    expect: {status: 400}
+  - id: perf-enable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/enable
+    expect: {status: 204}
+  - id: perf-status-primary
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect:
+      status: 200
+      exact:
+        data.mode: primary
+        data.state: running
+        data.corrupted_merkle_tree: false
+        data.ssct_generation_counter: 0
+        data.secondaries: []
+        data.known_secondaries: []
+        data.last_performance_wal: 0
+        data.last_wal: 0
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [cluster_id, merkle_root, last_corruption_check_epoch, last_reindex_epoch, primary_cluster_addr]
+            properties:
+              cluster_id: {type: string}
+              merkle_root: {type: string}
+              last_corruption_check_epoch: {type: string}
+              last_reindex_epoch: {type: string}
+              primary_cluster_addr: {type: string, pattern: '^https?://'}
+  - id: perf-combined-status-shows-performance
+    request: {method: GET, path: /v1/sys/replication/status}
+    no_auth: true
+    expect:
+      status: 200
+      exact: {data.performance.mode: primary}
+      body_schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              dr: {type: object}
+              performance: {type: object}
+  - id: perf-token-missing-id
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/secondary-token
+    expect: {status: 400}
+  - id: perf-token-issue
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/secondary-token
+      body: {id: compat-secondary}
+    expect:
+      status: 200
+      exact: {data: null}
+      body_schema:
+        type: object
+        required: [wrap_info]
+        properties:
+          wrap_info:
+            type: object
+            required: [token, ttl]
+            properties:
+              token: {type: string}
+              ttl: {type: integer}
+  - id: perf-token-duplicate-id
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/secondary-token
+      body: {id: compat-secondary}
+    expect: {status: 400}
+  - id: perf-known-secondaries-listed
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect: {status: 200, exact: {data.known_secondaries: [compat-secondary]}}
+  - id: perf-revoke-unknown
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/revoke-secondary
+      body: {id: compat-unknown}
+    expect: {status: 400}
+  - id: perf-revoke-secondary
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/revoke-secondary
+      body: {id: compat-secondary}
+    expect: {status: 204}
+  - id: perf-status-after-revoke
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect: {status: 200, exact: {data.known_secondaries: []}}
+  - id: perf-demote
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/demote
+    expect: {status: 204}
+  - id: perf-status-after-demote
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect:
+      status: 200
+      exact:
+        data.mode: secondary
+        data.known_primary_cluster_addrs: null
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [cluster_id, secondary_id, state]
+            properties:
+              cluster_id: {type: string}
+              secondary_id: {type: string}
+              state: {type: string}
+  - id: perf-re-enable-after-demote-rejected
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/enable
+    expect:
+      status: 400
+      errors_contain: ["must be promoted"]
+  - id: perf-promote-after-demote
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/secondary/promote
+    expect: {status: 204}
+  - id: perf-status-after-promote
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect: {status: 200, exact: {data.mode: primary}}
+  - id: perf-secondary-enable-bad-token
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/secondary/enable
+      body: {token: junk}
+    expect: {status: 400}
+  - id: perf-secondary-promote-when-primary-errors
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/secondary/promote
+    expect: {status: 400}
+  - id: perf-disable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/disable
+    expect: {status: 204}
+  - id: perf-status-after-disable
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect: {status: 200, exact: {data: {}}}

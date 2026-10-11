@@ -926,7 +926,10 @@ func (c *Core) waitForLeadership(manualStepDown *bool, manualStepDownCh, stopCh 
 	}
 
 	// Attempt the post-unseal process
-	c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformancePrimary))
+	if err := c.refreshReplicationStateConsts(activeCtx, true); err != nil {
+		c.logger.Error("replication state refresh failed", "error", err)
+		c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformancePrimary))
+	}
 	err = c.postUnseal(activeCtx, activeCtxCancel, standardUnsealStrategy{})
 	if err == nil {
 		c.standby.Store(false)
@@ -938,7 +941,10 @@ func (c *Core) waitForLeadership(manualStepDown *bool, manualStepDownCh, stopCh 
 
 	// Handle a failure to unseal
 	if err != nil {
-		c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformanceStandby))
+		if err := c.refreshReplicationStateConsts(activeCtx, false); err != nil {
+			c.logger.Error("replication state refresh failed", "error", err)
+			c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformanceStandby))
+		}
 		c.standby.Store(true)
 		c.logger.Error("post-unseal setup failed", "error", err)
 		lock.Unlock()
@@ -1263,7 +1269,9 @@ func (c *Core) runReadEnabledStandby(ctx context.Context, ctxCancel context.Canc
 	c.logger.Info("entering read-enabled standby mode")
 
 	// Unseal, holding the state lock.
-	c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformanceStandby))
+	if err := c.refreshReplicationStateConsts(ctx, false); err != nil {
+		c.replicationState.Store(uint32(consts.ReplicationDRDisabled | consts.ReplicationPerformanceStandby))
+	}
 	if err := c.postUnseal(ctx, ctxCancel, readonlyUnsealStrategy{}); err != nil {
 		c.logger.Error("read-only post-unseal setup failed", "error", err)
 

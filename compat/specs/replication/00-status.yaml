@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-replication-status
+feature: replication
+source: https://developer.hashicorp.com/vault/api-docs/system/replication
+source_version: "2.x (latest)"
+notes: >-
+  REP: /sys/replication/status is unauthenticated and reports
+  data.performance and data.dr stanzas; streams that are not enabled are
+  omitted. Typed endpoints /sys/replication/performance/status and
+  /sys/replication/dr/status return the single stream's stanza directly
+  under data. When nothing is enabled the response is an empty data
+  object; the empty-object exact match is satisfied by {"data": {}} and
+  fails once any stanza is present. Run first against a disposable target.
+cases:
+  - id: status-empty-unauth
+    request: {method: GET, path: /v1/sys/replication/status}
+    no_auth: true
+    expect: {status: 200, exact: {data: {}}}
+  - id: status-typed-performance-empty
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect: {status: 200, exact: {data: {}}}
+  - id: status-typed-dr-empty
+    request: {method: GET, path: /v1/sys/replication/dr/status}
+    no_auth: true
+    expect: {status: 200, exact: {data: {}}}
+  - id: status-empty-auth
+    request: {method: GET, path: /v1/sys/replication/status}
+    expect: {status: 200, exact: {data: {}}}

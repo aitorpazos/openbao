@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-replication-maintenance
+feature: replication
+source: https://developer.hashicorp.com/vault/api-docs/system/replication
+source_version: "2.x (latest)"
+notes: >-
+  REP: maintenance endpoints. merkle-check reports the corruption report
+  (phase 1: no corruption detected); reindex accepts diff/force/skip_flush
+  and refreshes the index stamp; recover returns a warnings array. All are
+  root-namespace restricted writes. The merkle-root shape in phase 1 is a
+  storage-walk hash (notes.md deviation); corrupted_index_tuples_map is
+  null here rather than a per-page map. generate-public-key returns a
+  lazily generated key pair without persisting state when the stream is
+  disabled. The scenario manages its own stream lifecycle.
+cases:
+  - id: maintenance-enable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/enable
+    expect: {status: 204}
+  - id: maintenance-dr-enable
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/primary/enable
+    expect: {status: 204}
+  - id: combined-status-shows-both
+    request: {method: GET, path: /v1/sys/replication/status}
+    no_auth: true
+    expect:
+      status: 200
+      exact:
+        data.performance.mode: primary
+        data.dr.mode: primary
+  - id: maintenance-dr-disable
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/primary/disable
+    expect: {status: 204}
+  - id: merkle-check-healthy
+    request:
+      method: POST
+      path: /v1/sys/replication/merkle-check
+    expect:
+      status: 200
+      exact:
+        data.merkle_corruption_report.corrupted_root: false
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [merkle_corruption_report, last_corruption_check_epoch]
+            properties:
+              last_corruption_check_epoch: {type: string}
+              merkle_corruption_report:
+                type: object
+                required: [corrupted_root, corrupted_tree_map]
+                properties:
+                  corrupted_root: {type: boolean}
+                  corrupted_tree_map: {type: object}
+  - id: reindex
+    request:
+      method: POST
+      path: /v1/sys/replication/reindex
+      body: {diff: false, force: true, skip_flush: false}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [warnings]
+            properties:
+              warnings: {type: array, items: {type: string}}
+  - id: reindex-stamps-epoch
+    request: {method: GET, path: /v1/sys/replication/performance/status}
+    no_auth: true
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [last_reindex_epoch]
+            properties:
+              last_reindex_epoch:
+                type: string
+                pattern: '^[0-9]+$'
+  - id: recover-enabled
+    request:
+      method: POST
+      path: /v1/sys/replication/recover
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [warnings]
+            properties:
+              warnings: {type: array, items: {type: string}}
+  - id: generate-public-key-performance
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/secondary/generate-public-key
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [public_key]
+            properties:
+              public_key: {type: string}
+  - id: generate-public-key-dr
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/secondary/generate-public-key
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [public_key]
+            properties:
+              public_key: {type: string}
+  - id: dynamic-filter-read
+    request: {method: GET, path: /v1/sys/replication/performance/secondary/dynamic-filter/compat-secondary}
+    expect:
+      status: 200
+      exact:
+        data.dynamic_filtered_mounts: []
+        data.dynamic_filtered_namespaces: []
+  - id: maintenance-disable
+    request:
+      method: POST
+      path: /v1/sys/replication/performance/primary/disable
+    expect: {status: 204}
+  - id: maintenance-status-clean
+    request: {method: GET, path: /v1/sys/replication/status}
+    no_auth: true
+    expect: {status: 200, exact: {data: {}}}

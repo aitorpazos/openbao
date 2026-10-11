@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-replication-dr-primary
+feature: replication
+source: https://developer.hashicorp.com/vault/api-docs/system/replication/replication-dr
+source_version: "2.x (latest)"
+notes: >-
+  REPD: DR primary lifecycle mirrors performance, minus the paths-filter
+  surface. The combined status reports the dr stanza alongside performance.
+  DR enable when performance is disabled is permitted (independent
+  streams). DR secondary disable/promote require a dr_operation_token; the
+  no-token case is verified here (400 on any node), while the full
+  secondary-op-token flow requires a live secondary cluster and is covered
+  by unit tests (internal/vault/replication_test.go).
+cases:
+  - id: dr-enable
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/primary/enable
+    expect: {status: 204}
+  - id: dr-status-primary
+    request: {method: GET, path: /v1/sys/replication/dr/status}
+    no_auth: true
+    expect:
+      status: 200
+      exact:
+        data.mode: primary
+        data.state: running
+        data.known_secondaries: []
+        data.last_dr_wal: 0
+  - id: combined-status-shows-dr
+    request: {method: GET, path: /v1/sys/replication/status}
+    no_auth: true
+    expect:
+      status: 200
+      exact:
+        data.dr.mode: primary
+  - id: dr-token-issue
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/primary/secondary-token
+      body: {id: compat-dr-secondary}
+    expect:
+      status: 200
+      exact: {data: null}
+      body_schema:
+        type: object
+        required: [wrap_info]
+        properties:
+          wrap_info:
+            type: object
+            required: [token, ttl]
+            properties:
+              token: {type: string}
+              ttl: {type: integer}
+  - id: dr-secondary-disable-without-op-token
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/secondary/disable
+    expect: {status: 400}
+  - id: dr-secondary-promote-without-op-token
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/secondary/promote
+    expect: {status: 400}
+  - id: dr-disable
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/primary/disable
+    expect: {status: 204}
+  - id: dr-status-after-disable
+    request: {method: GET, path: /v1/sys/replication/dr/status}
+    no_auth: true
+    expect: {status: 200, exact: {data: {}}}
+  - id: combined-status-after-disable
+    request: {method: GET, path: /v1/sys/replication/status}
+    no_auth: true
+    expect: {status: 200, exact: {data: {}}}
