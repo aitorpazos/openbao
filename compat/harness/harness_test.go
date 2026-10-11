@@ -74,6 +74,34 @@ func TestSchemaErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestAbsent(t *testing.T) {
+	tests := []struct {
+		name  string
+		keys  []string
+		body  string
+		valid bool
+	}{
+		{"key-present", []string{"data.nskv/"}, `{"data":{"nskv/":{"type":"kv"}}}`, false},
+		{"key-absent", []string{"data.nskv/"}, `{"data":{"sys/":{}}}`, true},
+		{"ancestor-missing", []string{"data.nskv/"}, `{"other":{}}`, true},
+		{"top-level-present", []string{"nskv/"}, `{"nskv/":{},"sys/":{}}`, false},
+		{"top-level-absent", []string{"nskv/"}, `{"sys/":{}}`, true},
+		{"ancestor-not-object", []string{"data.nskv/"}, `{"data":"scalar"}`, true},
+		{"empty-body-trivially-absent", []string{"data.nskv/"}, `null`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body any
+			if err := json.Unmarshal([]byte(tt.body), &body); err != nil {
+				t.Fatal(err)
+			}
+			if err := matchAbsent(tt.keys, body); (err == nil) != tt.valid {
+				t.Fatalf("valid=%v error=%v", tt.valid, err)
+			}
+		})
+	}
+}
 func testCase() Case {
 	return Case{ID: "one", Request: Request{Method: "GET", Path: "/v1/test"}, Expect: Expect{Status: Statuses{200}}}
 }
@@ -151,7 +179,7 @@ func TestAssertions(t *testing.T) {
 			}
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(tt.status); fmt.Fprint(w, tt.body) }))
 			defer s.Close()
-			v, _, _, d := runCase(s.Client(), s.URL, "", "", "", spec.Cases[0])
+			v, _, d, _ := runCase(s.Client(), s.URL, "", "", "", spec.Cases[0])
 			if v != tt.want {
 				t.Fatalf("%s: %s", v, d)
 			}
@@ -296,7 +324,7 @@ func TestRequest(t *testing.T) {
 	var node yaml.Node
 	yaml.Unmarshal([]byte("{n: 1}"), &node)
 	c.Request.Body = *node.Content[0]
-	v, _, _, d := runCase(s.Client(), s.URL, "", "", "", c)
+	v, _, d, _ := runCase(s.Client(), s.URL, "", "", "", c)
 	if v != "PASS" {
 		t.Fatalf("%s %s", v, d)
 	}
@@ -310,7 +338,7 @@ func TestExpected404NotFeatureAbsent(t *testing.T) {
 	defer s.Close()
 	c := testCase()
 	c.Expect.Status = Statuses{200, 404}
-	v, _, _, d := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "", "mfa-stepup", c)
+	v, _, d, _ := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "", "mfa-stepup", c)
 	if v != "PASS" {
 		t.Fatalf("expected PASS, got %s %s", v, d)
 	}

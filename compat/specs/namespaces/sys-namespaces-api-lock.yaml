@@ -1,0 +1,105 @@
+api: sys-namespaces-api-lock
+feature: namespaces
+source: https://developer.hashicorp.com/vault/api-docs/system/namespaces
+source_version: "v2.x (latest)"
+notes: >
+  Derived from the /sys/namespaces API page (lock/unlock sections) and the
+  namespace-api-lock concepts page. Locking returns an unlock_key
+  ({"unlock_key": ...} in the docs sample, asserted within the standard
+  envelope). "If a request is made to a non-exempt path from a locked
+  namespace, e.g. nsA, Vault responds with an HTTP 503: Service Unavailable"
+  and the documented error message naming the locking namespace. Exempt paths
+  "are largely the same as the Vault unauthenticated paths. They are mainly
+  used for checking the status of various systems (e.g., sys/health)" — so
+  sys/health must respond from a locked namespace. Unlocking without an
+  unlock_key requires a root token ("The unlock key requirement can be
+  overriden by using a root token with the unlock request"); the root-token
+  unlock is asserted by status only (the docs show no sample response). The
+  key-based unlock flow requires unlock_key capture from the lock response
+  (harness v2 variable capture) and is out of scope for the v1 spec.
+cases:
+  - id: create-ns
+    request:
+      method: POST
+      path: /v1/sys/namespaces/nslock
+    expect:
+      status: 200
+  - id: lock-via-subpath
+    depends: [create-ns]
+    request:
+      method: POST
+      path: /v1/sys/namespaces/api-lock/lock/nslock
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [unlock_key]
+            properties:
+              unlock_key:
+                type: string
+  - id: locked-mount-blocked
+    depends: [lock-via-subpath]
+    request:
+      method: POST
+      path: /v1/sys/mounts/nslockkv
+      headers:
+        X-Vault-Namespace: nslock/
+      body:
+        type: kv
+        options:
+          version: "2"
+    expect:
+      status: 503
+      errors_contain:
+        - "API access to this namespace has been locked by an administrator"
+  - id: health-exempt-in-locked-ns
+    depends: [lock-via-subpath]
+    request:
+      method: GET
+      path: /v1/sys/health
+      headers:
+        X-Vault-Namespace: nslock/
+    expect:
+      status: 200
+  - id: unlock-sudo
+    depends: [lock-via-subpath]
+    request:
+      method: POST
+      path: /v1/sys/namespaces/api-lock/unlock
+      headers:
+        X-Vault-Namespace: nslock/
+    expect:
+      status: [200, 204]
+  - id: mount-after-unlock
+    depends: [unlock-sudo]
+    request:
+      method: POST
+      path: /v1/sys/mounts/nslockkv
+      headers:
+        X-Vault-Namespace: nslock/
+      body:
+        type: kv
+        options:
+          version: "2"
+    expect:
+      status: [200, 204]
+  - id: cleanup-mount
+    depends: [mount-after-unlock]
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/nslockkv
+      headers:
+        X-Vault-Namespace: nslock/
+    expect:
+      status: [200, 204]
+  - id: cleanup-ns
+    depends: [cleanup-mount]
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/nslock
+    expect:
+      status: [200, 204]

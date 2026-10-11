@@ -1,0 +1,117 @@
+api: sys-namespaces-isolation
+feature: namespaces
+source: https://developer.hashicorp.com/vault/docs/enterprise/namespaces
+source_version: "v2.x (latest)"
+notes: >
+  Isolation semantics from the namespaces concepts page: creating a namespace
+  "establish[s] an isolated environment" where users "create and manage their
+  sensitive data within the confines of that namespace, including: secret
+  engines, authentication methods, ACL, EGP, and RGP policies, ...". A secret
+  engine (KV mount) and an ACL policy created under the namespace must be
+  visible through the namespace (X-Vault-Namespace header) and through the
+  documented absolute-path routing ("You can also provide an absolute
+  namespace path without using the X-Vault-Namespace header"), and must NOT
+  appear in the root namespace's listings (the `absent` harness assertion
+  checks key non-presence). Policy read at root uses the generic Vault
+  404-for-missing-resource behavior.
+cases:
+  - id: create-ns
+    request:
+      method: POST
+      path: /v1/sys/namespaces/nsiso
+    expect:
+      status: 200
+  - id: mount-in-ns
+    depends: [create-ns]
+    request:
+      method: POST
+      path: /v1/sys/mounts/nskv
+      headers:
+        X-Vault-Namespace: nsiso/
+      body:
+        type: kv
+        options:
+          version: "2"
+    expect:
+      status: [200, 204]
+  - id: policy-in-ns
+    depends: [create-ns]
+    request:
+      method: PUT
+      path: /v1/sys/policies/acl/nspol
+      headers:
+        X-Vault-Namespace: nsiso/
+      body:
+        policy: 'path "kv/*" { capabilities = ["read"] }'
+    expect:
+      status: [200, 204]
+  - id: mounts-in-ns
+    depends: [mount-in-ns]
+    request:
+      method: GET
+      path: /v1/sys/mounts
+      headers:
+        X-Vault-Namespace: nsiso/
+    expect:
+      status: 200
+      exact:
+        data.nskv/.type: kv
+  - id: policy-in-ns-read
+    depends: [policy-in-ns]
+    request:
+      method: GET
+      path: /v1/sys/policies/acl/nspol
+      headers:
+        X-Vault-Namespace: nsiso/
+    expect:
+      status: 200
+  - id: mounts-via-path-prefix
+    depends: [mount-in-ns]
+    request:
+      method: GET
+      path: /v1/nsiso/sys/mounts
+    expect:
+      status: 200
+      exact:
+        data.nskv/.type: kv
+  - id: mounts-root-absent
+    depends: [mount-in-ns]
+    request:
+      method: GET
+      path: /v1/sys/mounts
+    expect:
+      status: 200
+      absent:
+        - data.nskv/
+  - id: policy-root-absent
+    depends: [policy-in-ns]
+    request:
+      method: GET
+      path: /v1/sys/policies/acl/nspol
+    expect:
+      status: 404
+  - id: cleanup-mount
+    depends: [mounts-root-absent]
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/nskv
+      headers:
+        X-Vault-Namespace: nsiso/
+    expect:
+      status: [200, 204]
+  - id: cleanup-policy
+    depends: [policy-root-absent]
+    request:
+      method: DELETE
+      path: /v1/sys/policies/acl/nspol
+      headers:
+        X-Vault-Namespace: nsiso/
+    expect:
+      status: [200, 204]
+  - id: cleanup-ns
+    depends: [cleanup-mount]
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/nsiso
+    expect:
+      status: [200, 204]

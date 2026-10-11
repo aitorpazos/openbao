@@ -207,6 +207,43 @@ func matchContains(contains map[string]any, body any) error {
 	}
 	return nil
 }
+
+// matchAbsent asserts that, at each dotted key, the response body does NOT
+// contain the final key segment. Namespace isolation specs use this to prove
+// a namespaced object does not leak into a root-scoped response. If an
+// ancestor key along the dotted path is missing (or not an object), the
+// target key cannot exist and the check passes for that key.
+func matchAbsent(keys []string, body any) error {
+	for _, key := range keys {
+		parts := strings.Split(key, ".")
+		last := parts[len(parts)-1]
+		parent := body
+		walkable := true
+		for i := 0; i < len(parts)-1; i++ {
+			obj, ok := parent.(map[string]any)
+			if !ok {
+				walkable = false
+				break
+			}
+			v, exists := obj[parts[i]]
+			if !exists {
+				walkable = false
+				break
+			}
+			parent = v
+		}
+		if !walkable {
+			continue
+		}
+		if obj, ok := parent.(map[string]any); ok {
+			if _, exists := obj[last]; exists {
+				return fmt.Errorf("absent %s: key is present", key)
+			}
+		}
+	}
+	return nil
+}
+
 func matchErrors(patterns []string, body any) error {
 	if len(patterns) == 0 {
 		return nil

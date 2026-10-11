@@ -53,8 +53,12 @@ type Expect struct {
 	// Contains asserts list membership at dotted keys without requiring the
 	// whole list to match.
 	Contains map[string]any `yaml:"contains"`
-	Errors   []string       `yaml:"errors_contain"`
-	Body     yaml.Node      `yaml:"body"`
+	// Absent asserts that each dotted key is NOT present in the response
+	// (isolation checks: a namespaced object must not appear in a
+	// root-scoped response). A missing ancestor chain satisfies the check.
+	Absent []string  `yaml:"absent"`
+	Errors []string  `yaml:"errors_contain"`
+	Body   yaml.Node `yaml:"body"`
 }
 type Statuses []int
 

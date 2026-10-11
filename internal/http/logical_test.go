@@ -1058,8 +1058,11 @@ func TestLogical_AuditEnabled_ShouldLogPluginMetadata_Secret(t *testing.T) {
 }
 
 // TestLogical_NamespaceRestrictedAPIs verifies that:
-// 1. Restricted APIs cannot be accessed from non-root namespaces (400 error)
-// 2. Non-restricted APIs can be successfully accessed from namespaces with proper permissions
+//  1. Restricted APIs cannot be accessed from non-root namespaces (400 error)
+//  2. Non-restricted APIs can be successfully accessed from namespaces with proper permissions
+//  3. sys/health is exempt from the namespace restriction: the Vault
+//     documentation (namespace-api-lock) names it as an exempt path that
+//     responds from within a namespace (the example status path).
 func TestLogical_NamespaceRestrictedAPIs(t *testing.T) {
 	// Create a test cluster
 	cluster := vault.NewTestCluster(t, nil, &vault.TestClusterOptions{
@@ -1085,9 +1088,10 @@ func TestLogical_NamespaceRestrictedAPIs(t *testing.T) {
 	nsClient.SetNamespace("testns/")
 	nsClient.SetToken(rootToken)
 
-	// Write policy that grants access to the non-restricted APIs we want to test
-	// grants access to sys/health, sys/init, and sys/metrics verifying that the namespace
-	// still has no access to the restricted APIs
+	// Write policy that grants access to the non-restricted APIs we want to test.
+	// It also grants sys/health (exempt per the namespace api-lock docs) and the
+	// restricted sys/init and sys/metrics, verifying that policy grants do not
+	// bypass the namespace restriction.
 	policyName := "ns-test-policy"
 	policyHCL := `
 	path "sys/mounts" {
@@ -1128,9 +1132,14 @@ func TestLogical_NamespaceRestrictedAPIs(t *testing.T) {
 
 	// Test cases
 	restrictedAPIs := []string{
-		"sys/health",
 		"sys/init",
 		"sys/metrics",
+	}
+	// sys/health is exempt from the namespace restriction: the Vault
+	// documentation (namespace-api-lock) names it as an exempt path that
+	// responds from within a namespace.
+	exemptAPIs := []string{
+		"sys/health",
 	}
 
 	nonRestrictedAPIs := []string{
@@ -1208,6 +1217,21 @@ func TestLogical_NamespaceRestrictedAPIs(t *testing.T) {
 			if resp != nil && resp.Body != nil {
 				resp.Body.Close() //nolint:errcheck
 			}
+		})
+	}
+
+	// Exempt APIs respond from within a namespace (sys/health is the example
+	// exempt status path cited by the namespace api-lock documentation).
+	for _, path := range exemptAPIs {
+		t.Run("exempt-"+path, func(t *testing.T) {
+			resp, err := nsAuthClient.Logical().ReadRaw(path)
+
+			require.NoError(t, err, "Exempt API should succeed within a namespace")
+			require.NotNil(t, resp, "Response should not be nil")
+			require.Equal(t, http.StatusOK, resp.StatusCode,
+				"Exempt API should return 200 OK with namespace")
+
+			resp.Body.Close() //nolint:errcheck
 		})
 	}
 }

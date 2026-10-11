@@ -67,7 +67,10 @@ var (
 
 	// restrictedSysAPIsNonLogical is the set of `sys/` APIs available only in the root namespace
 	// that may not pass through logical request handling but are handled in HTTP using specialized
-	// calls to core. This is a subset of `vault.restrictedSysAPIs`.
+	// calls to core. This is a subset of `vault.restrictedSysAPIs`. sys/health is intentionally
+	// NOT in this set: the Vault documentation names it as an exempt path that must respond from
+	// within a namespace (namespace-api-lock concepts page: exempt paths "are mainly used for
+	// checking the status of various systems (e.g., sys/health)").
 	restrictedSysAPIsNonLogical = pathmanager.New()
 
 	injectDataIntoTopRoutes = []string{
@@ -117,7 +120,6 @@ func init() {
 		"seal",
 		"step-down",
 		"unseal",
-		"health",
 		"rekey-recovery-key",
 		"rekey",
 		"storage",

@@ -25,6 +25,8 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/quotas/quotas.go` | +7 lines: `TypeLeaseCount` in type list, `String()`, `leaseRecords` map init/reset, parse case | Adds the lease-count quota type to the existing quota manager | — |
 | `internal/vault/expiration.go` | +11 lines: quota-check call at lease registration, error mapping | Enforcement: reject lease issuance when quota exhausted | — |
 | `internal/vault/request_handling.go` | +17 lines: `checkBatchLeaseQuota` calls at auth/secret lease creation, error mapping to `logical.ErrLeaseCountQuotaExceeded` | Enforcement: batch/auth lease paths respect lease-count quotas | — |
+| `internal/http/handler.go` | removed `health` from `restrictedSysAPIsNonLogical` (+ docs rationale comment) | Vault docs (namespace-api-lock) cite sys/health as an exempt path that responds from within a namespace; the old block returned 400 "operation unavailable in namespaces" | — |
+| `internal/http/logical_test.go` | `TestLogical_NamespaceRestrictedAPIs`: sys/health moved from the restricted list to a new exempt subtest (200 within namespace) | The test asserted the pre-parity behavior contradicted by the documented api-lock exempt paths | — |
 | `internal/vault/core.go` | +3 lines in `configureLogicalBackends`: transform engine factory registration | Mountable `transform` engine (additive builtin) | — |
 | `internal/vault/logical_system.go` | ha-status response: capitalized `Nodes` array (same entries as legacy lowercase `nodes`) gains per-node `redundancy_zone` — each node's own `autopilot_redundancy_zone` raft-storage label, learned by the active node over the echo channel; empty for unconfigured nodes and non-raft clusters | Documented Vault Enterprise /sys/ha-status shape (api-docs/system/ha-status, v2.x (latest)); lowercase `nodes` unchanged for OpenBao back-compat | — |
 | `internal/vault/core.go` | +2 lines: `PeerNode.RedundancyZone` field + copy from cached echo info | Zone labels for ha-status compat nodes | — |
@@ -129,3 +131,40 @@ keypair); `compat/specs/replication/*.yaml` 57/57 PASS on a fresh dev server (ha
 extended with `no_auth` case option for the documented unauthenticated status
 endpoints); two-server cross-cluster activation verified manually (token from primary
 activates a second server; secondary reports the primary's cluster_id).
+
+### Namespaces (compat-namespaces branch)
+
+Additive (`compat/`): `compat/specs/namespaces/` — 5 spec files (api-lock, crud,
+isolation, naming, nested), 35 harness cases, all PASS against a dev server.
+Harness module gained the `absent` expectation (dotted keys that must NOT be
+present; missing ancestors count as absent) for isolation checks, plus
+pre-existing-but-broken `runCase` call sites in `harness_test.go` fixed (the
+harness module's tests never compiled after the signature grew; they are in a
+separate go.mod so main-repo test runs never saw it).
+
+Core seams (ledger rows above):
+
+- `internal/http/handler.go` — sys/health removed from
+  `restrictedSysAPIsNonLogical`. The Vault docs (namespace-api-lock) cite
+  sys/health as an exempt path that responds from within a namespace; the old
+  block returned 400 "operation unavailable in namespaces" for any request
+  carrying a namespace header, including from locked namespaces.
+- `internal/http/logical_test.go` — `TestLogical_NamespaceRestrictedAPIs`
+  moved sys/health from the restricted list to a new exempt subtest asserting
+  200 within a namespace (docs-win-over-test).
+
+Key behaviors confirmed live (dev server, port 8400):
+
+- Namespace CRUD per the docs sample shapes; single-segment create rule
+  (400 "namespace name cannot contain /" for the `a/b` form); reserved/space
+  naming rejections match the docs exactly.
+- Parent-child routing: create child via `X-Vault-Namespace: ns1/`; absolute
+  path-prefix routing (`/v1/ns1/sys/mounts`) equivalence.
+- Isolation: mounts and policies mounted in a namespace do not appear in the
+  root's sys/mounts LIST or sys/policy GET responses.
+- api-lock: LOCK returns `unlock_key`; locked requests fail 503 with the
+  documented error string; sys/health stays exempt while locked; sudo unlock
+  works without the key.
+- Namespace deletion is asynchronous (DELETE → 200
+  `{"status":"in-progress"}`); a parent delete may transiently 400 until a
+  child's async deletion completes (specs document and tolerate this).

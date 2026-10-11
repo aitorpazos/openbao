@@ -1,0 +1,76 @@
+api: sys-namespaces-nested
+feature: namespaces
+source: https://developer.hashicorp.com/vault/api-docs/system/namespaces
+source_version: "v2.x (latest)"
+notes: >
+  The concepts documentation (Vault docs, enterprise/namespaces) describes
+  child namespaces: "given the namespace path A/B/C: A is the top-most
+  namespace..., B is a child namespace of A...". The API page's create sample
+  uses a single path segment; creating a child under a parent is therefore
+  specced through the documented relative-routing semantics (X-Vault-Namespace
+  header places the request inside the parent namespace, then
+  POST /sys/namespaces/<child> creates the child). Reading and listing the
+  child under the parent header context asserts the fully-qualified path form
+  consistent with the docs' GET/LIST samples (path values carry the full
+  namespace path). The fork rejects multi-segment paths directly on
+  /sys/namespaces/<a/b> (400 "namespace name cannot contain /"); the docs do
+  not documented for namespace management, so it is not asserted. The fork
+  deletes namespaces asynchronously (DELETE returns {"status":"in-progress"}),
+  so the parent cleanup may transiently fail with 400 until the child
+  deletion completes; 400 is accepted there with that explanation.
+cases:
+  - id: create-parent
+    request:
+      method: POST
+      path: /v1/sys/namespaces/nsp
+    expect:
+      status: 200
+  - id: create-child-via-header
+    depends: [create-parent]
+    request:
+      method: POST
+      path: /v1/sys/namespaces/nsc
+      headers:
+        X-Vault-Namespace: nsp/
+    expect:
+      status: 200
+  - id: read-child-via-header
+    depends: [create-child-via-header]
+    request:
+      method: GET
+      path: /v1/sys/namespaces/nsc
+      headers:
+        X-Vault-Namespace: nsp/
+    expect:
+      status: 200
+      exact:
+        data.path: nsp/nsc/
+  - id: list-under-parent
+    depends: [create-child-via-header]
+    request:
+      method: LIST
+      path: /v1/sys/namespaces
+      headers:
+        X-Vault-Namespace: nsp/
+    expect:
+      status: 200
+      contains:
+        data.keys: [nsc/]
+      exact:
+        data.key_info.nsc/.path: nsp/nsc/
+  - id: cleanup-child
+    depends: [list-under-parent]
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/nsc
+      headers:
+        X-Vault-Namespace: nsp/
+    expect:
+      status: [200, 204]
+  - id: cleanup-parent
+    depends: [cleanup-child]
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/nsp
+    expect:
+      status: [200, 204, 400]

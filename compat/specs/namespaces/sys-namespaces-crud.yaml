@@ -1,0 +1,110 @@
+api: sys-namespaces-crud
+feature: namespaces
+source: https://developer.hashicorp.com/vault/api-docs/system/namespaces
+source_version: "v2.x (latest)"
+notes: >
+  Derived from the /sys/namespaces API page. The docs LIST sample shows the
+  standard request_id/lease/data envelope ({"data": {"key_info": ..., "keys":
+  [...]}}); the GET sample shows the bare payload (id/path/custom_metadata)
+  without the envelope, which we assert inside the standard envelope per the
+  API-wide response convention. Create/Patch/Delete have no documented sample
+  response, so their assertions are status-only (200 for create/patch per the
+  fork's OpenAPI; delete accepts 200/204). The post-delete read is not
+  documented; the fork deletes asynchronously (DELETE returns 200 with
+  {"status":"in-progress"}), so a read immediately after may still return the
+  namespace (200) until deletion completes, then 204. Each entry in the LIST key_info carries
+  custom_metadata, id and path per the docs sample.
+cases:
+  - id: create-ns
+    request:
+      method: POST
+      path: /v1/sys/namespaces/nscrud
+      body:
+        custom_metadata:
+          team: qa
+    expect:
+      status: 200
+  - id: read-ns
+    depends: [create-ns]
+    request:
+      method: GET
+      path: /v1/sys/namespaces/nscrud
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [id, path, custom_metadata]
+            properties:
+              id:
+                type: string
+              path:
+                type: string
+              custom_metadata:
+                type: object
+      exact:
+        data.path: nscrud/
+        data.custom_metadata.team: qa
+  - id: patch-ns
+    depends: [create-ns]
+    request:
+      method: PATCH
+      path: /v1/sys/namespaces/nscrud
+      headers:
+        Content-Type: application/merge-patch+json
+      body:
+        custom_metadata:
+          team: qa2
+    expect:
+      status: 200
+  - id: read-after-patch
+    depends: [patch-ns]
+    request:
+      method: GET
+      path: /v1/sys/namespaces/nscrud
+    expect:
+      status: 200
+      exact:
+        data.custom_metadata.team: qa2
+  - id: list-namespaces
+    depends: [create-ns]
+    request:
+      method: LIST
+      path: /v1/sys/namespaces
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys, key_info]
+            properties:
+              keys:
+                type: array
+                items:
+                  type: string
+              key_info:
+                type: object
+      contains:
+        data.keys: [nscrud/]
+      exact:
+        data.key_info.nscrud/.path: nscrud/
+  - id: delete-ns
+    depends: [list-namespaces]
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/nscrud
+    expect:
+      status: [200, 204]
+  - id: read-after-delete
+    depends: [delete-ns]
+    request:
+      method: GET
+      path: /v1/sys/namespaces/nscrud
+    expect:
+      status: [200, 204, 404]

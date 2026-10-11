@@ -50,6 +50,8 @@ cases:
       exact: {foo: bar}           # optional: deep-equal on a subset (dotted keys OK)
       errors_contain: ["^bad"]    # optional: regex against response errors[] (negative cases)
       body: null                  # optional: assert empty body (204-style)
+      absent: [data.kv]           # optional: dotted keys that must NOT be present
+                                  # (missing ancestors count as absent)
 ```
 
 ### body_schema subset

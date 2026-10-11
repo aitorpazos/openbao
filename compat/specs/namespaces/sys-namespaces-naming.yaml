@@ -1,0 +1,31 @@
+api: sys-namespaces-naming
+feature: namespaces
+source: https://developer.hashicorp.com/vault/docs/enterprise/namespaces
+source_version: "v2.x (latest)"
+notes: >
+  Naming restrictions from the namespaces concepts page: "Valid Vault
+  namespace names: CANNOT end with /; CANNOT contain spaces; CANNOT be one of
+  the following reserved strings: root, sys, audit, auth, cubbyhole,
+  identity". The API page does not document response codes for invalid names;
+  400 is Vault's generic invalid-request convention. The trailing-slash rule
+  is not asserted: the request router normalizes trailing slashes before the
+  name is validated, so the URL-level form is ambiguous (noted, not specced).
+cases:
+  - id: create-reserved-sys
+    request:
+      method: POST
+      path: /v1/sys/namespaces/sys
+    expect:
+      status: 400
+  - id: create-reserved-auth
+    request:
+      method: POST
+      path: /v1/sys/namespaces/auth
+    expect:
+      status: 400
+  - id: create-space
+    request:
+      method: POST
+      path: /v1/sys/namespaces/a%20b
+    expect:
+      status: 400

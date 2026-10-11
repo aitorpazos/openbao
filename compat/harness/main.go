@@ -143,6 +143,9 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 	if err = matchContains(c.Expect.Contains, body); err != nil {
 		return "FAIL", status, err.Error(), captured
 	}
+	if err = matchAbsent(c.Expect.Absent, body); err != nil {
+		return "FAIL", status, err.Error(), captured
+	}
 	if err = matchErrors(c.Expect.Errors, body); err != nil {
 		return "FAIL", status, err.Error(), captured
 	}
