@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-rotation-orphans
+feature: rate-audit
+source: https://developer.hashicorp.com/vault/api-docs/system/rotation-orphans
+source_version: "v2.x (latest)"
+notes: |
+  Source: Read a list of orphans. Requires appropriate Enterprise license;
+  run with an administrative root token on an initialized, unsealed target.
+  Statuses: https://developer.hashicorp.com/vault/api-docs#http-status-codes,
+  v2.x (latest). The method is GET, not LIST; path uses rotation/orphans,
+  not rotation-orphans. Table has a trailing slash; curl example does not.
+  The response example is {"orphans":[...]} without an HTTP envelope. Like
+  enterprise-config/control-group specs, assert object/success rather than
+  guessing top-level versus data placement. No fixed orphan fixtures, empty-list
+  representation, pagination, deletion, or unsupported-method behavior is claimed.
+cases:
+  - id: rotation-orphans-read
+    request: {method: GET, path: /v1/sys/rotation/orphans}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: rotation-orphans-read-table-path
+    request: {method: GET, path: /v1/sys/rotation/orphans/}
+    expect: {status: 200, body_schema: {type: object}}

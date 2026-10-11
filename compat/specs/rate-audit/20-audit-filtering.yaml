@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-audit-enterprise-filtering
+feature: rate-audit
+source: https://developer.hashicorp.com/vault/api-docs/system/audit
+source_version: "v2.x (latest)"
+notes: |
+  Source: Enable audit device, Common configuration options, Disable audit device.
+  Additional sources, all v2.x (latest):
+  https://developer.hashicorp.com/vault/docs/enterprise/audit/filtering
+  (fallback uniqueness, filter properties and device limitations);
+  https://developer.hashicorp.com/vault/docs/enterprise/audit/exclusion
+  (exclude option, exclusion object and examples);
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and #error-response.
+  Requires licensed disposable Enterprise, initialized/unsealed, root namespace
+  root token (sudo), no existing fallback or compat-ra-* devices, no concurrent runs.
+  Keep an independent, healthy unfiltered audit device enabled throughout this suite.
+  Target process must be able to create/write /tmp/compat-ra-*.log; paths are on
+  the SERVER, not the harness host. Do not run against a production audit setup.
+  All common device options are inside options (map of string to string).
+  These are enable-time options, not tune/update operations. Only fixture cleanup
+  uses baseline device DELETE; no general audit CRUD suite is duplicated.
+  Assertions cover configuration acceptance/validation, NOT emitted log semantics.
+  Cleanup is unconditional, including names used in negative tests, and does not
+  delete server-side log files. Preserve/remove those separately after inspection.
+cases:
+  - id: audit-enable-fallback
+    request:
+      method: POST
+      path: /v1/sys/audit/compat-ra-fallback
+      body:
+        type: file
+        options: {file_path: /tmp/compat-ra-fallback.log, fallback: "true"}
+    expect: {status: [200, 204]}
+  - id: audit-second-fallback-rejected
+    depends: [audit-enable-fallback]
+    request:
+      method: POST
+      path: /v1/sys/audit/compat-ra-second-fallback
+      body:
+        type: file
+        options: {file_path: /tmp/compat-ra-second-fallback.log, fallback: "true"}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: audit-enable-filter
+    depends: [audit-enable-fallback]
+    request:
+      method: POST
+      path: /v1/sys/audit/compat-ra-filter
+      body:
+        type: file
+        options: {file_path: /tmp/compat-ra-filter.log, filter: 'operation == "read"'}
+    expect: {status: [200, 204]}
+  - id: audit-invalid-filter-property
+    request:
+      method: POST
+      path: /v1/sys/audit/compat-ra-invalid-filter
+      body:
+        type: file
+        options: {file_path: /tmp/compat-ra-invalid-filter.log, filter: 'compat_ra_unknown == "read"'}
+    expect: *invalid
+  - id: audit-enable-unconditional-exclusion
+    request:
+      method: POST
+      path: /v1/sys/audit/compat-ra-exclude
+      body:
+        type: file
+        options:
+          file_path: /tmp/compat-ra-exclude.log
+          exclude: '[{"fields":["/response/data"]}]'
+    expect: {status: [200, 204]}
+  - id: audit-enable-conditional-exclusions
+    request:
+      method: POST
+      path: /v1/sys/audit/compat-ra-conditional
+      body:
+        type: file
+        options:
+          file_path: /tmp/compat-ra-conditional.log
+          exclude: '[{"condition":"\"/request/mount_type\" == transit","fields":["/request/data","/response/data"]},{"condition":"\"/auth/client_token\" matches \"hmac.+\"","fields":["/auth/entity_id"]}]'
+    expect: {status: [200, 204]}
+  - id: audit-exclusion-invalid-json
+    request:
+      method: POST
+      path: /v1/sys/audit/compat-ra-invalid-exclude
+      body:
+        type: file
+        options: {file_path: /tmp/compat-ra-invalid-exclude.log, exclude: 'not-json'}
+    expect: *invalid
+  - id: audit-cleanup-filter
+    request: {method: DELETE, path: /v1/sys/audit/compat-ra-filter}
+    expect: {status: [200, 204]}
+  - id: audit-cleanup-invalid-filter
+    request: {method: DELETE, path: /v1/sys/audit/compat-ra-invalid-filter}
+    expect: {status: [200, 204]}
+  - id: audit-cleanup-exclude
+    request: {method: DELETE, path: /v1/sys/audit/compat-ra-exclude}
+    expect: {status: [200, 204]}
+  - id: audit-cleanup-conditional
+    request: {method: DELETE, path: /v1/sys/audit/compat-ra-conditional}
+    expect: {status: [200, 204]}
+  - id: audit-cleanup-invalid-exclude
+    request: {method: DELETE, path: /v1/sys/audit/compat-ra-invalid-exclude}
+    expect: {status: [200, 204]}
+  - id: audit-cleanup-second-fallback
+    request: {method: DELETE, path: /v1/sys/audit/compat-ra-second-fallback}
+    expect: {status: [200, 204]}
+  - id: audit-cleanup-fallback-last
+    request: {method: DELETE, path: /v1/sys/audit/compat-ra-fallback}
+    expect: {status: [200, 204]}

@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-quotas-rate-limit-identity
+feature: rate-audit
+source: https://developer.hashicorp.com/vault/api-docs/system/rate-limit-quotas
+source_version: "v2.x (latest)"
+notes: |
+  Source: Create or update a rate limit quota, group_by and secondary_rate;
+  Get a rate limit quota (data envelope), Delete a rate limit quota.
+  Status/error contracts: https://developer.hashicorp.com/vault/api-docs
+  #http-status-codes and #error-response, v2.x (latest).
+  Requires an appropriately licensed, initialized, unsealed disposable Enterprise
+  target and root token in root namespace. No pre-existing global quota or concurrent
+  traffic; compat-ra-identity must be unused. High rates avoid throttling this suite.
+  Tests only Enterprise grouping extensions, not baseline quota CRUD or role support.
+  Writes/readbacks use one fixture sequentially; unconditional cleanup also removes
+  a fixture accidentally accepted by a negative case. No enforcement/timing assertion.
+  Omitted secondary_rate has a documented effective default but its persisted
+  representation is unspecified; do not assert readback equals rate in that case.
+cases:
+  - id: identity-invalid-group
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/compat-ra-identity
+      body: {rate: 100000, group_by: compat-ra-invalid}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: identity-secondary-with-ip-rejected
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/compat-ra-identity
+      body: {rate: 100000, group_by: ip, secondary_rate: 50000}
+    expect: *invalid
+  - id: identity-secondary-with-none-rejected
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/compat-ra-identity
+      body: {rate: 100000, group_by: none, secondary_rate: 50000}
+    expect: *invalid
+  - id: identity-create-entity-then-ip
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/compat-ra-identity
+      body: {path: "", rate: 100000, interval: 1s, group_by: entity_then_ip, secondary_rate: 50000}
+    expect: {status: [200, 204]}
+  - id: identity-read-entity-then-ip
+    depends: [identity-create-entity-then-ip]
+    request: {method: GET, path: /v1/sys/quotas/rate-limit/compat-ra-identity}
+    expect:
+      status: 200
+      exact: {data.group_by: entity_then_ip, data.secondary_rate: 50000, data.rate: 100000}
+  - id: identity-update-entity-then-none
+    depends: [identity-create-entity-then-ip]
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/compat-ra-identity
+      body: {path: "", rate: 100000, interval: 1s, group_by: entity_then_none, secondary_rate: 60000}
+    expect: {status: [200, 204]}
+  - id: identity-read-entity-then-none
+    depends: [identity-update-entity-then-none]
+    request: {method: GET, path: /v1/sys/quotas/rate-limit/compat-ra-identity}
+    expect:
+      status: 200
+      exact: {data.group_by: entity_then_none, data.secondary_rate: 60000, data.rate: 100000}
+  - id: identity-delete-before-default-case
+    request: {method: DELETE, path: /v1/sys/quotas/rate-limit/compat-ra-identity}
+    expect: {status: [200, 204]}
+  - id: identity-create-default-secondary
+    depends: [identity-delete-before-default-case]
+    request:
+      method: POST
+      path: /v1/sys/quotas/rate-limit/compat-ra-identity
+      body: {path: "", rate: 100000, group_by: entity_then_ip}
+    expect: {status: [200, 204]}
+  - id: identity-read-default-secondary
+    depends: [identity-create-default-secondary]
+    request: {method: GET, path: /v1/sys/quotas/rate-limit/compat-ra-identity}
+    expect:
+      status: 200
+      exact: {data.group_by: entity_then_ip, data.rate: 100000}
+  - id: identity-delete-cleanup
+    request: {method: DELETE, path: /v1/sys/quotas/rate-limit/compat-ra-identity}
+    expect: {status: [200, 204]}
