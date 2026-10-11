@@ -118,8 +118,12 @@ func TestKMIPNativeTLS(t *testing.T) {
 		return n
 	}
 	response := kmipResult(t, exchange(kmipRequest(k.OpDiscoverVersions)), true)
-	if response.Find(k.ProtocolVersion).Find(k.ProtocolVersionMinor).Number() != 4 {
+	if len(response.Children()) != 2 || response.Children()[0].Find(k.ProtocolVersionMajor).Number() != 2 || response.Children()[1].Find(k.ProtocolVersionMinor).Number() != 4 {
 		t.Fatal(response)
+	}
+	response20 := exchange(kmipDRequest(true, k.OpQuery, k.E(k.QueryFunction, 13)))
+	if response20.Find(k.ResponseHeader).Find(k.ProtocolVersion).Find(k.ProtocolVersionMajor).Number() != 2 || kmipResult(t, response20, true).Find(k.DefaultsInformation).Type != k.Structure {
+		t.Fatal(response20)
 	}
 	response = kmipResult(t, exchange(kmipCreateRequest()), true)
 	id := response.Find(k.UniqueIdentifier).Text()

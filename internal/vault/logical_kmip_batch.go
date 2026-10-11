@@ -16,8 +16,8 @@ func kmipValidateBatch(n k.Node) string {
 		return "missing request header"
 	}
 	v := h.Find(k.ProtocolVersion)
-	if v.Find(k.ProtocolVersionMajor).Number() != 1 || v.Find(k.ProtocolVersionMinor).Number() != 4 {
-		return "only KMIP 1.4 is supported"
+	if !kmipSupportedVersion(v) {
+		return "only KMIP 1.4 and 2.0 are supported"
 	}
 	seen := map[uint32]bool{}
 	for _, f := range h.Children() {

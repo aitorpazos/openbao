@@ -20,13 +20,18 @@ import (
 )
 
 type kmipObject struct {
-	ID         string
-	Material   []byte
-	Algorithm  uint32
-	Bits       int32
-	State      uint32
-	Activation int64
-	Usage      int32
+	ObjectType       uint32
+	Format           uint32
+	Peer             string
+	Curve            uint32
+	CertificateBytes int32
+	ID               string
+	Material         []byte
+	Algorithm        uint32
+	Bits             int32
+	State            uint32
+	Activation       int64
+	Usage            int32
 }
 
 func kmipVersion() k.Node {
@@ -110,7 +115,7 @@ func (b *kmipBackend) kmipDispatch(ctx context.Context, s logical.Storage, cert 
 			if op == k.OpSign {
 				payload, reason, e = kmipSign(ctx, s, path, cert, item.Find(k.RequestPayload))
 			} else {
-				payload, reason, e = kmipExecute(ctx, s, path, op, item.Find(k.RequestPayload))
+				payload, reason, e = kmipExecuteVersion(ctx, s, path, op, item.Find(k.RequestPayload), n.Find(k.RequestHeader).Find(k.ProtocolVersion).Find(k.ProtocolVersionMajor).Number() == 2)
 			}
 			if e != nil {
 				return kmipFailure(op, reason, e.Error())
@@ -125,11 +130,28 @@ func (b *kmipBackend) kmipDispatch(ctx context.Context, s logical.Storage, cert 
 			break
 		}
 	}
-	header := k.S(k.ResponseHeader, kmipVersion(), k.Node{Tag: k.TimeStamp, Type: k.DateTime, Value: time.Now().Unix()}, k.I(k.BatchCount, int32(len(results))))
+	version := kmipVersion()
+	if kmipSupportedVersion(n.Find(k.RequestHeader).Find(k.ProtocolVersion)) {
+		version = n.Find(k.RequestHeader).Find(k.ProtocolVersion)
+	}
+	header := k.S(k.ResponseHeader, version, k.Node{Tag: k.TimeStamp, Type: k.DateTime, Value: time.Now().Unix()}, k.I(k.BatchCount, int32(len(results))))
 	return k.S(k.ResponseMessage, append([]k.Node{header}, results...)...)
 }
 func kmipAttributes(o *kmipObject) []k.Node {
-	out := []k.Node{k.T(k.UniqueIdentifier, o.ID), k.E(k.ObjectType, 2), k.E(k.CryptographicAlgorithm, o.Algorithm), k.I(k.CryptographicLength, o.Bits), k.I(k.CryptographicUsageMask, o.Usage), k.E(k.State, o.State)}
+	out := []k.Node{k.T(k.UniqueIdentifier, o.ID), k.E(k.ObjectType, o.objectType()), k.E(k.CryptographicAlgorithm, o.Algorithm), k.I(k.CryptographicLength, o.Bits), k.I(k.CryptographicUsageMask, o.Usage), k.E(k.State, o.State)}
+	if o.objectType() == 1 {
+		out = []k.Node{k.T(k.UniqueIdentifier, o.ID), k.E(k.ObjectType, 1), k.E(k.CertificateType, 1), k.I(k.CertificateLength, o.CertificateBytes), k.I(k.CryptographicUsageMask, o.Usage), k.E(k.State, o.State)}
+	}
+	if o.Peer != "" {
+		linkType := uint32(0x102)
+		if o.objectType() == 3 {
+			linkType = 0x103
+		}
+		out = append(out, k.S(k.Link, k.E(k.LinkType, linkType), k.T(k.LinkedObjectIdentifier, o.Peer)))
+	}
+	if o.Curve != 0 {
+		out = append(out, k.S(k.CryptographicDomainParameters, k.E(k.RecommendedCurve, o.Curve)))
+	}
 	if o.Activation != 0 {
 		out = append(out, k.Node{Tag: k.ActivationDate, Type: k.DateTime, Value: o.Activation})
 	}
@@ -187,16 +209,23 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 	prefix := path + "/objects/"
 	out := []k.Node{}
 	switch op {
+	case k.OpRegister, k.OpCreateKeyPair:
+		return kmipAsymmetric(ctx, s, prefix, op, p)
 	case k.OpDiscoverVersions:
-		if len(p.Children()) == 0 {
-			return k.S(k.ResponsePayload, kmipVersion()), 0, nil
-		}
 		for _, v := range p.Children() {
-			if v.Tag != k.ProtocolVersion {
+			if v.Tag != k.ProtocolVersion || v.Type != k.Structure || !kmipWireFields(v, k.ProtocolVersionMajor, k.ProtocolVersionMinor) || len(v.Children()) != 2 || v.Find(k.ProtocolVersionMajor).Type != k.Integer || v.Find(k.ProtocolVersionMinor).Type != k.Integer {
 				return fail(4, "invalid version request")
 			}
-			if v.Find(k.ProtocolVersionMajor).Number() == 1 && v.Find(k.ProtocolVersionMinor).Number() == 4 {
-				out = append(out, kmipVersion())
+		}
+		for _, supported := range []k.Node{kmipVersion20(), kmipVersion()} {
+			match := len(p.Children()) == 0
+			for _, v := range p.Children() {
+				if v.Find(k.ProtocolVersionMajor).Number() == supported.Find(k.ProtocolVersionMajor).Number() && v.Find(k.ProtocolVersionMinor).Number() == supported.Find(k.ProtocolVersionMinor).Number() {
+					match = true
+				}
+			}
+			if match {
+				out = append(out, supported)
 			}
 		}
 	case k.OpQuery:
@@ -223,7 +252,9 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 					out = append(out, k.E(k.Operation, uint32(op)))
 				}
 			case 2:
-				out = append(out, k.E(k.ObjectType, 2))
+				for _, typ := range []uint32{1, 2, 3, 4} {
+					out = append(out, k.E(k.ObjectType, typ))
+				}
 			case 3:
 				out = append(out, k.T(k.VendorIdentification, "OpenBao"))
 			default:
@@ -279,8 +310,8 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 		for _, a := range p.Children() {
 			name := a.Find(k.AttributeName).Text()
 			v := a.Find(k.AttributeValue)
-			if a.Tag != k.Attribute || v.Type != k.Enumeration || (name != "State" && name != "Cryptographic Algorithm") {
-				return fail(5, "only state and algorithm Locate filters supported")
+			if a.Tag != k.Attribute || v.Type != k.Enumeration || (name != "State" && name != "Cryptographic Algorithm" && name != "Object Type") {
+				return fail(5, "only state, object type and algorithm Locate filters supported")
 			}
 		}
 		ids, e := s.List(ctx, prefix)
@@ -300,6 +331,8 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 			for _, a := range p.Children() {
 				v := a.Find(k.AttributeValue).Number()
 				switch a.Find(k.AttributeName).Text() {
+				case "Object Type":
+					match = match && o.objectType() == v
 				case "State":
 					match = match && o.State == v
 				case "Cryptographic Algorithm":
@@ -330,7 +363,14 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 			if o.State == 5 {
 				return fail(11, "object is destroyed")
 			}
-			out = append([]k.Node{k.E(k.ObjectType, 2)}, out...)
+			out = append([]k.Node{k.E(k.ObjectType, o.objectType())}, out...)
+			if o.objectType() != 2 {
+				if p.Find(k.KeyWrappingSpecification).Tag != 0 {
+					return fail(5, "wrapping only supports AES")
+				}
+				out = append(out, o.wireObject())
+				break
+			}
 			block := k.S(k.KeyBlock, k.E(k.KeyFormatType, 1), k.S(k.KeyValue, k.B(k.KeyMaterial, o.Material)), k.E(k.CryptographicAlgorithm, o.Algorithm), k.I(k.CryptographicLength, o.Bits))
 			if w := p.Find(k.KeyWrappingSpecification); w.Tag != 0 {
 				var reason uint32
@@ -359,6 +399,9 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 				return fail(0x100, "object storage failed")
 			}
 		case k.OpRekey:
+			if o.objectType() != 2 {
+				return fail(5, "Re-key requires a symmetric key")
+			}
 			if o.State == 5 {
 				return fail(11, "object is destroyed")
 			}
