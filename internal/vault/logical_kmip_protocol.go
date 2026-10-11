@@ -69,55 +69,64 @@ func kmipIdentity(ctx context.Context, s logical.Storage, cert *x509.Certificate
 func (b *kmipBackend) kmipDispatch(ctx context.Context, s logical.Storage, cert *x509.Certificate, n k.Node) k.Node {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	item := n.Find(k.BatchItem)
-	op := item.Find(k.Operation).Number()
-	result := func() k.Node {
-		if n.Tag != k.RequestMessage || n.Type != k.Structure {
-			return kmipFailure(op, 4, "expected Request Message")
+	headerError := kmipValidateBatch(n)
+	items := []k.Node{}
+	for _, item := range n.Children() {
+		if item.Tag == k.BatchItem {
+			items = append(items, item)
 		}
-		header := n.Find(k.RequestHeader)
-		version := header.Find(k.ProtocolVersion)
-		if header.Find(k.BatchCount).Number() != 1 || len(n.Children()) != 2 || item.Type != k.Structure {
-			return kmipFailure(op, 4, "exactly one batch item is supported")
-		}
-		if version.Find(k.ProtocolVersionMajor).Number() != 1 || version.Find(k.ProtocolVersionMinor).Number() != 4 {
-			return kmipFailure(op, 4, "only KMIP 1.4 is supported")
-		}
-		if len(header.Children()) != 2 || item.Find(k.RequestPayload).Type != k.Structure {
-			return kmipFailure(op, 4, "unsupported header or missing payload")
-		}
-		for _, v := range item.Children() {
-			if v.Tag != k.Operation && v.Tag != k.RequestPayload && v.Tag != k.UniqueBatchItemID {
-				return kmipFailure(op, 4, "unsupported batch field")
-			}
-		}
-		path, role, e := kmipIdentity(ctx, s, cert)
-		if e != nil {
-			return kmipFailure(op, 12, "credential is not authorized")
-		}
-		name, ok := k.Operations[op]
-		if !ok {
-			return kmipFailure(op, 5, "operation is not supported")
-		}
-		if role["operation_none"] == true || (role["operation_all"] != true && role["operation_"+name] != true) {
-			return kmipFailure(op, 12, "operation is not permitted by role")
-		}
-		var payload k.Node
-		var reason uint32
-		if op == k.OpSign {
-			payload, reason, e = kmipSign(ctx, s, path, cert, item.Find(k.RequestPayload))
-		} else {
-			payload, reason, e = kmipExecute(ctx, s, path, op, item.Find(k.RequestPayload))
-		}
-		if e != nil {
-			return kmipFailure(op, reason, e.Error())
-		}
-		return k.S(k.BatchItem, k.E(k.Operation, op), k.E(k.ResultStatus, 0), payload)
-	}()
-	if id := item.Find(k.UniqueBatchItemID); id.Type == k.ByteString {
-		result.Value = append(result.Children(), id)
 	}
-	return k.S(k.ResponseMessage, k.S(k.ResponseHeader, kmipVersion(), k.Node{Tag: k.TimeStamp, Type: k.DateTime, Value: time.Now().Unix()}, k.I(k.BatchCount, 1)), result)
+	if len(items) == 0 {
+		items = append(items, k.S(k.BatchItem))
+	}
+	results := []k.Node{}
+	for _, item := range items {
+		op := item.Find(k.Operation).Number()
+		result := func() k.Node {
+			if headerError != "" {
+				return kmipFailure(op, 4, headerError)
+			}
+			if item.Type != k.Structure || item.Find(k.RequestPayload).Type != k.Structure {
+				return kmipFailure(op, 4, "missing payload")
+			}
+			for _, v := range item.Children() {
+				if v.Tag != k.Operation && v.Tag != k.RequestPayload && v.Tag != k.UniqueBatchItemID {
+					return kmipFailure(op, 4, "unsupported batch field")
+				}
+			}
+			path, role, e := kmipIdentity(ctx, s, cert)
+			if e != nil {
+				return kmipFailure(op, 12, "credential is not authorized")
+			}
+			name, ok := k.Operations[op]
+			if !ok {
+				return kmipFailure(op, 5, "operation is not supported")
+			}
+			if role["operation_none"] == true || (role["operation_all"] != true && role["operation_"+name] != true) {
+				return kmipFailure(op, 12, "operation is not permitted by role")
+			}
+			var payload k.Node
+			var reason uint32
+			if op == k.OpSign {
+				payload, reason, e = kmipSign(ctx, s, path, cert, item.Find(k.RequestPayload))
+			} else {
+				payload, reason, e = kmipExecute(ctx, s, path, op, item.Find(k.RequestPayload))
+			}
+			if e != nil {
+				return kmipFailure(op, reason, e.Error())
+			}
+			return k.S(k.BatchItem, k.E(k.Operation, op), k.E(k.ResultStatus, 0), payload)
+		}()
+		if id := item.Find(k.UniqueBatchItemID); id.Type == k.ByteString {
+			result.Value = append(result.Children(), id)
+		}
+		results = append(results, result)
+		if headerError == "" && result.Find(k.ResultStatus).Number() != 0 && n.Find(k.RequestHeader).Find(k.BatchErrorContinuationOption).Number() == 2 {
+			break
+		}
+	}
+	header := k.S(k.ResponseHeader, kmipVersion(), k.Node{Tag: k.TimeStamp, Type: k.DateTime, Value: time.Now().Unix()}, k.I(k.BatchCount, int32(len(results))))
+	return k.S(k.ResponseMessage, append([]k.Node{header}, results...)...)
 }
 func kmipAttributes(o *kmipObject) []k.Node {
 	out := []k.Node{k.T(k.UniqueIdentifier, o.ID), k.E(k.ObjectType, 2), k.E(k.CryptographicAlgorithm, o.Algorithm), k.I(k.CryptographicLength, o.Bits), k.I(k.CryptographicUsageMask, o.Usage), k.E(k.State, o.State)}
@@ -303,7 +312,7 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 		}
 	default:
 		for _, v := range p.Children() {
-			if v.Tag != k.UniqueIdentifier && !(op == k.OpGetAttributes && v.Tag == k.AttributeName) {
+			if v.Tag != k.UniqueIdentifier && !(op == k.OpGetAttributes && v.Tag == k.AttributeName) && !(op == k.OpGet && v.Tag == k.KeyWrappingSpecification) {
 				return fail(5, "unsupported operation parameter")
 			}
 		}
@@ -315,11 +324,22 @@ func kmipExecute(ctx context.Context, s logical.Storage, path string, op uint32,
 		out = append(out, k.T(k.UniqueIdentifier, id))
 		switch op {
 		case k.OpGet:
+			if !kmipWireFields(p, k.UniqueIdentifier, k.KeyWrappingSpecification) {
+				return fail(4, "duplicate or unsupported Get field")
+			}
 			if o.State == 5 {
 				return fail(11, "object is destroyed")
 			}
 			out = append([]k.Node{k.E(k.ObjectType, 2)}, out...)
-			out = append(out, k.S(k.SymmetricKey, k.S(k.KeyBlock, k.E(k.KeyFormatType, 1), k.S(k.KeyValue, k.B(k.KeyMaterial, o.Material)), k.E(k.CryptographicAlgorithm, o.Algorithm), k.I(k.CryptographicLength, o.Bits))))
+			block := k.S(k.KeyBlock, k.E(k.KeyFormatType, 1), k.S(k.KeyValue, k.B(k.KeyMaterial, o.Material)), k.E(k.CryptographicAlgorithm, o.Algorithm), k.I(k.CryptographicLength, o.Bits))
+			if w := p.Find(k.KeyWrappingSpecification); w.Tag != 0 {
+				var reason uint32
+				block, reason, e = kmipWrapGet(ctx, s, prefix, o, w)
+				if e != nil {
+					return k.Node{}, reason, e
+				}
+			}
+			out = append(out, k.S(k.SymmetricKey, block))
 		case k.OpActivate:
 			if o.State != 1 {
 				return fail(11, "only Pre-Active objects can be activated")

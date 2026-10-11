@@ -1,7 +1,7 @@
 <!-- Copyright (c) OpenBao Contributors -->
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 
-# Native KMIP pass B: supported subset and deviations
+# Native KMIP pass C: supported subset and deviations
 
 This is a clean-room implementation based on the public [OASIS KMIP 1.4
 specification](https://docs.oasis-open.org/kmip/spec/v1.4/os/kmip-spec-v1.4-os.html),
@@ -23,9 +23,20 @@ The HTTP-only compatibility harness is deliberately unchanged.
   is advertised and accepted, rather than falsely advertising 2.0 support.
 * Limits: four MiB per frame, nesting depth 32, 128 concurrent connections,
   15-second handshake and 30-second per-request I/O deadline. Invalid framing
-  closes the connection. Single synchronous batch items only (sections 6–7);
-  asynchronous options, extensions, placeholders, batch dependencies, maximum
-  response size negotiation and undo are rejected/not supported.
+  closes the connection. Multiple synchronous batch items are processed in
+  request order (sections 6.4, 6.12–6.15, 7.1–7.2), with independent results and
+  supplied Unique Batch Item IDs echoed, including failures. Continue (wire 1)
+  processes later items after failure; Stop (2) ends at the failing item and
+  returns only processed items with the corresponding response Batch Count.
+  Undo (3), unknown options, true Asynchronous Indicator, and Maximum Response
+  Size are rejected before any operation executes (existing reason 4 convention).
+  False asynchronous and either Batch Order Option value are accepted; execution
+  remains sequential. Extensions, placeholders and batch dependencies remain
+  unsupported. **Local compatibility deviations:** omitted continuation defaults
+  to Continue as requested for this subset, whereas section 6.13 specifies Stop;
+  section 9.1.3.2.30 calls value 1 Continue, not PROCESS, and defines no IGNORE.
+  Missing multi-item IDs are tolerated; supplied IDs must be unique ByteStrings
+  (the spec requires IDs for multi-item requests).
 
 ## Operations and objects
 
@@ -43,8 +54,26 @@ headers, batch items and result status/reason fields.
   constants but generation/import and key-pair object creation are deferred.
 * Get: raw AES ByteString inside the standard Symmetric Key / Key Block /
   Key Value / Key Material structure, not an untyped standalone byte response.
-  Wrapping, alternate formats, compression, sensitive/nonextractable policies
-  and attribute mutation are unsupported.
+  Get without wrapping preserves its original wire representation. Wrapped Get
+  (section **4.11**, not 4.4) accepts **Key Wrapping Specification** (2.1.6) in
+  requests, not Key Wrapping Data, which belongs in responses (2.1.5). The slice
+  is Encrypt (Wrapping Method 1), explicit NISTKeyWrap (Block Cipher Mode 0x0D,
+  9.1.3.2.14), and explicit No Encoding (Encoding Option 1). Omitted encoding
+  means TTLV in the spec and is rejected, not silently treated as raw. AES-KW
+  follows RFC 3394 with the default integrity register and no padding, for
+  128/192/256-bit target and wrapping keys. The wrapping key must be a different
+  AES object in the authenticated role's store, Active, with Wrap Key usage
+  (0x10); missing, inactive, and unauthorized keys return reasons 1, 11, and 12.
+  Wrapped Key Value is a ByteString; Key Wrapping Data records the method,
+  Encryption Key Information (identifier and Cryptographic Parameters), and
+  encoding. Unknown/duplicate wrapping fields and other methods, modes, or
+  encodings return reason 5 (unsupported operation parameter convention);
+  same-key wrapping and invalid material return reason 4.
+  **Parameter-model deviation:** this subset has no stored Cryptographic
+  Parameters attribute; it accepts explicit AES/NISTKeyWrap parameters without
+  the stored-attribute match required by section 2.1.6. It does not infer missing
+  parameters or implement general attribute mutation. Alternate formats,
+  compression, and sensitive/nonextractable policies remain unsupported.
 * Get Attributes/Get Attribute List: Unique Identifier, Object Type,
   Cryptographic Algorithm, Cryptographic Length, Cryptographic Usage Mask,
   State, and Activation Date when set (section 3). Attribute selection is by
@@ -114,5 +143,11 @@ failover and mount-tune orchestration are not covered by the local tests.
 Tests cover codec vectors, all types, nesting/padding, malformed and bounded
 frames, TLS end-to-end Discover/Create/Get/Destroy, authorization and revocation,
 role isolation, attributes, Locate, state transitions, Re-key, ECDSA/RSA signing,
-and concurrent lifecycle reconciliation. They use an in-memory logical store and
+and concurrent lifecycle reconciliation. Pass C adds batch Continue/Stop,
+per-item ID echo and failure results, rejected controls without side effects,
+wrapped/plain Get stability, AES-KW known-answer and round-trip checks for all
+supported key sizes, invalid wrapping controls, wrapping-key state/usage checks,
+and cross-role wrapping-key isolation. Batch tests round-trip TTLV frames; the
+Create/Get/Destroy batch uses an existing identifier for Get/Destroy, since ID
+placeholders are not implemented. They use an in-memory logical store and
 real loopback TLS with a generated self-signed CA, not simulated wire responses.
