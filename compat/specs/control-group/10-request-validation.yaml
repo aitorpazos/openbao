@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-control-group-request-validation
+feature: control-group
+source: https://developer.hashicorp.com/vault/api-docs/system/control-group
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Authorize control group request; Check control group request
+  status. Both POST endpoints require accessor (string), not access_token.
+  Status 400 for missing required data and errors array derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and
+  #error-response, v2.x (latest). Run on an initialized, unsealed, appropriately
+  licensed disposable Enterprise target with an administrative token.
+  No fixture IDs, identities, approvals, writes to policies, or cleanup needed.
+  Missing-accessor errors alone do not establish working authorization semantics.
+  Unknown/expired accessor status and exact error text are not documented here;
+  do not guess 400/404 or equate a wrapping token accessor with an access token.
+  Positive approved/request_entity/authorizations schemas require genuine wrapping
+  fixtures and are inventoried in notes.md, not simulated with invented IDs.
+cases:
+  - id: authorize-missing-accessor
+    request:
+      method: POST
+      path: /v1/sys/control-group/authorize
+      body: {}
+    expect: &missing-required
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: request-missing-accessor
+    request:
+      method: POST
+      path: /v1/sys/control-group/request
+      body: {}
+    expect: *missing-required

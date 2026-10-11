@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-config-control-group
+feature: control-group
+source: https://developer.hashicorp.com/vault/api-docs/system/config-control-group
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Read, Configure and Delete control group settings.
+  Statuses/error schema additionally derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and
+  #error-response, v2.x (latest). Use an initialized, unsealed, disposable
+  appropriately licensed Enterprise target and administrative root-namespace
+  token. This changes singleton settings: configuration MUST be absent initially,
+  no other control-group users or concurrent runs may exist. Unconditional DELETE
+  removes settings; this suite does not restore an existing configuration.
+  The page documents POST, not a separate PUT contract. max_ttl accepts seconds
+  or duration strings. Read sample is {"max_ttl":"4h"} with no HTTP envelope;
+  follow existing specs by asserting object/success without guessing data versus
+  top-level placement or normalized duration formatting. Full TTL readback and
+  post-delete defaults/status await unambiguous documentation (see notes.md).
+  Invalid object input follows the documented int/duration type and general 400
+  contract; no exact error wording is asserted. No 404 success fallback.
+cases:
+  - id: config-invalid-ttl-object
+    request:
+      method: POST
+      path: /v1/sys/config/control-group
+      body: {max_ttl: {invalid: true}}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: config-create-duration
+    request:
+      method: POST
+      path: /v1/sys/config/control-group
+      body: {max_ttl: "4h"}
+    expect: {status: [200, 204]}
+  - id: config-read-duration
+    depends: [config-create-duration]
+    request: {method: GET, path: /v1/sys/config/control-group}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: config-update-seconds
+    depends: [config-create-duration]
+    request:
+      method: POST
+      path: /v1/sys/config/control-group
+      body: {max_ttl: 7200}
+    expect: {status: [200, 204]}
+  - id: config-read-seconds
+    depends: [config-create-duration, config-update-seconds]
+    request: {method: GET, path: /v1/sys/config/control-group}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: config-update-duration
+    depends: [config-create-duration, config-update-seconds]
+    request:
+      method: POST
+      path: /v1/sys/config/control-group
+      body: {max_ttl: "2h"}
+    expect: {status: [200, 204]}
+  - id: config-read-updated-duration
+    depends: [config-create-duration, config-update-duration]
+    request: {method: GET, path: /v1/sys/config/control-group}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: config-delete-cleanup
+    request: {method: DELETE, path: /v1/sys/config/control-group}
+    expect: {status: [200, 204]}
