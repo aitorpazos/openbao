@@ -1,0 +1,184 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sentinel-enforcement
+feature: sentinel
+source: https://developer.hashicorp.com/vault/docs/enterprise/sentinel
+source_version: "2.x (latest)"
+notes: >-
+  Documented enforcement semantics (enterprise/sentinel): evaluation order is
+  ACL grant, then RGPs on the token, then EGPs on the requested path (exact
+  match plus prefix-matching EGPs on less-specific paths); all must pass
+  according to their enforcement level. Root tokens are not subject to
+  Sentinel policy checks. Overrides apply to soft-mandatory policies only,
+  via the X-Vault-Policy-Override header; override requests are visible in
+  the audit log (policy_override flag) and logged as warnings. The policy
+  documents below use the documented declarative condition subset; the
+  always-failing rule negates a universally-true condition. Lookup-self is
+  used as the allowed/denied probe because the default policy grants it to
+  every token, isolating governing-policy effects from ACL effects.
+cases:
+  - id: enforcement-acl-policy
+    request:
+      method: POST
+      path: /v1/sys/policies/acl/compat-sentinel-user
+      body:
+        policy: |
+          path "auth/token/lookup-self" {
+            capabilities = ["read"]
+          }
+    expect: {status: 204}
+  - id: enforcement-token
+    request:
+      method: POST
+      path: /v1/auth/token/create
+      body:
+        policies: ["compat-sentinel-user"]
+        ttl: 1h
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [auth]
+    capture_token: true
+  - id: enforcement-probe-allowed-baseline
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 200}
+  - id: egp-hard-create
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-sentinel-hard
+      body:
+        policy: '{"when": {"not": {"any": [{"request.path": "*"}]}}}'
+        enforcement_level: hard-mandatory
+        paths: ["auth/token/lookup-self"]
+    expect: {status: 204}
+  - id: egp-hard-denies
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 403}
+    use_captured_token: true
+  - id: egp-root-bypasses
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 200}
+  - id: egp-hard-to-advisory
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-sentinel-hard
+      body:
+        policy: '{"when": {"not": {"any": [{"request.path": "*"}]}}}'
+        enforcement_level: advisory
+        paths: ["auth/token/lookup-self"]
+    expect: {status: 204}
+  - id: egp-advisory-allows
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 200}
+    use_captured_token: true
+  - id: egp-hard-to-soft
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-sentinel-hard
+      body:
+        policy: '{"when": {"not": {"any": [{"request.path": "*"}]}}}'
+        enforcement_level: soft-mandatory
+        paths: ["auth/token/lookup-self"]
+    expect: {status: 204}
+  - id: egp-soft-denies
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 403}
+    use_captured_token: true
+  - id: egp-soft-override-allows
+    request:
+      method: GET
+      path: /v1/auth/token/lookup-self
+      headers: {"X-Vault-Policy-Override": "true"}
+    expect: {status: 200}
+    use_captured_token: true
+  - id: egp-prefix-and-exact-both-apply
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-sentinel-prefix
+      body:
+        policy: '{"when": {"not": {"any": [{"request.path": "*"}]}}}'
+        enforcement_level: hard-mandatory
+        paths: ["auth/token/*"]
+    expect: {status: 204}
+  - id: egp-prefix-additionally-denies
+    request:
+      method: GET
+      path: /v1/auth/token/lookup-self
+      headers: {"X-Vault-Policy-Override": "true"}
+    expect: {status: 403}
+    use_captured_token: true
+  - id: egp-prefix-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/egp/compat-sentinel-prefix}
+    expect: {status: 204}
+  - id: egp-soft-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/egp/compat-sentinel-hard}
+    expect: {status: 204}
+  - id: rgp-hard-create
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/compat-sentinel-rgp
+      body:
+        policy: '{"when": {"not": {"any": [{"request.path": "*"}]}}}'
+        enforcement_level: hard-mandatory
+    expect: {status: 204}
+  - id: rgp-token-with-policy
+    request:
+      method: POST
+      path: /v1/auth/token/create
+      body:
+        policies: ["compat-sentinel-user", "compat-sentinel-rgp"]
+        ttl: 1h
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [auth]
+    capture_token: true
+  - id: rgp-hard-denies
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 403}
+    use_captured_token: true
+  - id: rgp-root-bypasses
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 200}
+  - id: rgp-to-soft
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/compat-sentinel-rgp
+      body:
+        policy: '{"when": {"not": {"any": [{"request.path": "*"}]}}}'
+        enforcement_level: soft-mandatory
+    expect: {status: 204}
+  - id: rgp-soft-denies
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 403}
+    use_captured_token: true
+  - id: rgp-soft-override-allows
+    request:
+      method: GET
+      path: /v1/auth/token/lookup-self
+      headers: {"X-Vault-Policy-Override": "true"}
+    expect: {status: 200}
+    use_captured_token: true
+  - id: rgp-to-advisory
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/compat-sentinel-rgp
+      body:
+        policy: '{"when": {"not": {"any": [{"request.path": "*"}]}}}'
+        enforcement_level: advisory
+    expect: {status: 204}
+  - id: rgp-advisory-allows
+    request: {method: GET, path: /v1/auth/token/lookup-self}
+    expect: {status: 200}
+    use_captured_token: true
+  - id: rgp-token-revoke
+    request: {method: POST, path: /v1/auth/token/revoke-self}
+    expect: {status: 204}
+    use_captured_token: true
+  - id: rgp-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/rgp/compat-sentinel-rgp}
+    expect: {status: 204}
+  - id: enforcement-acl-policy-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/acl/compat-sentinel-user}
+    expect: {status: 204}

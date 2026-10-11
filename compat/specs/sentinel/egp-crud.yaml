@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-policies-egp
+feature: sentinel
+source: https://developer.hashicorp.com/vault/api-docs/system/policies
+source_version: "2.x (latest)"
+notes: >-
+  Public API documentation: LIST/GET/POST/DELETE /sys/policies/egp[/:name].
+  POST requires policy (string, may be base64-encoded), enforcement_level
+  (one of advisory, soft-mandatory, hard-mandatory), and paths (string or
+  array; globs are suffix-only; "*" affects all authenticated and login
+  requests). GET returns {name, policy, enforcement_level, paths}. LIST
+  returns keys and, per the prose, name_path_map mapping names to paths and
+  glob status; the documented sample shows only keys, so name_path_map is
+  optional here. Delete returns 204. The policy document is accepted by this
+  implementation only in the documented declarative condition subset (see
+  notes.md); invalid documents are rejected at write time. Missing EGP read
+  returns an empty 204, mirroring the ACL policy read convention in this
+  codebase (the API page does not define a not-found shape).
+cases:
+  - id: egp-create
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp
+      body:
+        policy: '{"when": {"request.path": "secret/*"}}'
+        enforcement_level: hard-mandatory
+        paths: ["secret/*"]
+    expect: {status: 204}
+  - id: egp-read
+    request: {method: GET, path: /v1/sys/policies/egp/compat-egp}
+    expect:
+      status: 200
+      exact:
+        data.name: compat-egp
+        data.enforcement_level: hard-mandatory
+        data.policy: '{"when": {"request.path": "secret/*"}}'
+      contains: {data.paths: ["secret/*"]}
+  - id: egp-list
+    request: {method: LIST, path: /v1/sys/policies/egp}
+    expect:
+      status: 200
+      contains: {data.keys: ["compat-egp"]}
+  - id: egp-missing-policy-field
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp-bad
+      body:
+        enforcement_level: hard-mandatory
+        paths: ["*"]
+    expect: {status: 400}
+  - id: egp-missing-enforcement
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp-bad
+      body:
+        policy: '{"when": {"request.path": "*"}}'
+        paths: ["*"]
+    expect: {status: 400}
+  - id: egp-invalid-enforcement
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp-bad
+      body:
+        policy: '{"when": {"request.path": "*"}}'
+        enforcement_level: sometimes
+        paths: ["*"]
+    expect: {status: 400}
+  - id: egp-missing-paths
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp-bad
+      body:
+        policy: '{"when": {"request.path": "*"}}'
+        enforcement_level: hard-mandatory
+    expect: {status: 400}
+  - id: egp-invalid-glob
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp-bad
+      body:
+        policy: '{"when": {"request.path": "*"}}'
+        enforcement_level: hard-mandatory
+        paths: ["secret/*/keys"]
+    expect: {status: 400}
+  - id: egp-invalid-document
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp-bad
+      body:
+        policy: 'rule main = { when true }'
+        enforcement_level: advisory
+        paths: ["*"]
+    expect: {status: 400}
+  - id: egp-update
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp
+      body:
+        policy: '{"when": {"request.path": "secret/*"}}'
+        enforcement_level: soft-mandatory
+        paths: ["secret/*"]
+    expect: {status: 204}
+  - id: egp-read-updated
+    request: {method: GET, path: /v1/sys/policies/egp/compat-egp}
+    expect:
+      status: 200
+      exact:
+        data.enforcement_level: soft-mandatory
+  - id: egp-base64-document
+    request:
+      method: POST
+      path: /v1/sys/policies/egp/compat-egp-b64
+      body:
+        policy: eyJ3aGVuIjogeyJyZXF1ZXN0LnBhdGgiOiAic2VjcmV0LyoifX0=
+        enforcement_level: hard-mandatory
+        paths: ["secret/*"]
+    expect: {status: 204}
+  - id: egp-base64-read-decoded
+    request: {method: GET, path: /v1/sys/policies/egp/compat-egp-b64}
+    expect:
+      status: 200
+      exact:
+        data.policy: '{"when": {"request.path": "secret/*"}}'
+  - id: egp-delete
+    request: {method: DELETE, path: /v1/sys/policies/egp/compat-egp-b64}
+    expect: {status: 204}
+  - id: egp-read-deleted
+    request: {method: GET, path: /v1/sys/policies/egp/compat-egp-b64}
+    expect: {status: 204}
+  - id: egp-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/egp/compat-egp}
+    expect: {status: 204}

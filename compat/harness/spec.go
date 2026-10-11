@@ -27,8 +27,15 @@ type Spec struct {
 type Case struct {
 	ID      string   `yaml:"id"`
 	Depends []string `yaml:"depends"`
-	Request Request  `yaml:"request"`
-	Expect  Expect   `yaml:"expect"`
+	// CaptureToken stores auth.client_token from a successful response so
+	// later cases can act as the created identity (e.g. token-based
+	// enforcement checks).
+	CaptureToken bool `yaml:"capture_token"`
+	// UseCapturedToken sends the previously captured token instead of the
+	// run token for this case.
+	UseCapturedToken bool      `yaml:"use_captured_token"`
+	Request          Request   `yaml:"request"`
+	Expect           Expect    `yaml:"expect"`
 }
 type Request struct {
 	Method  string            `yaml:"method"`
@@ -40,8 +47,11 @@ type Expect struct {
 	Status Statuses       `yaml:"status"`
 	Schema map[string]any `yaml:"body_schema"`
 	Exact  map[string]any `yaml:"exact"`
-	Errors []string       `yaml:"errors_contain"`
-	Body   yaml.Node      `yaml:"body"`
+	// Contains asserts list membership at dotted keys without requiring the
+	// whole list to match.
+	Contains map[string]any `yaml:"contains"`
+	Errors   []string       `yaml:"errors_contain"`
+	Body     yaml.Node      `yaml:"body"`
 }
 type Statuses []int
 

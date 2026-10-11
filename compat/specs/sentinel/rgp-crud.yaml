@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-policies-rgp
+feature: sentinel
+source: https://developer.hashicorp.com/vault/api-docs/system/policies
+source_version: "2.x (latest)"
+notes: >-
+  Public API documentation: LIST/GET/POST/DELETE /sys/policies/rgp[/:name].
+  POST requires policy (string, may be base64-encoded) and enforcement_level
+  (one of advisory, soft-mandatory, hard-mandatory); RGPs take no paths.
+  GET returns {name, policy, enforcement_level}. Listed policies cannot share
+  names with ACL policies (documented rule; the docs prose states RGPs are
+  assigned to tokens/entities/groups like ACL policies and cannot share
+  names). Missing RGP read returns an empty 204, mirroring the ACL policy
+  read convention in this codebase. Enforcement of RGPs is via token policy
+  names (token-level attachment), evaluated in the request path after ACL
+  grant checks.
+cases:
+  - id: rgp-create
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/compat-rgp
+      body:
+        policy: '{"when": {"request.operation": "delete"}}'
+        enforcement_level: hard-mandatory
+    expect: {status: 204}
+  - id: rgp-read
+    request: {method: GET, path: /v1/sys/policies/rgp/compat-rgp}
+    expect:
+      status: 200
+      exact:
+        data.name: compat-rgp
+        data.enforcement_level: hard-mandatory
+        data.policy: '{"when": {"request.operation": "delete"}}'
+  - id: rgp-list
+    request: {method: LIST, path: /v1/sys/policies/rgp}
+    expect:
+      status: 200
+      contains: {data.keys: ["compat-rgp"]}
+  - id: rgp-rejects-paths
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/compat-rgp-bad
+      body:
+        policy: '{"when": {"request.path": "*"}}'
+        enforcement_level: hard-mandatory
+        paths: ["*"]
+    expect: {status: 400}
+  - id: rgp-invalid-enforcement
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/compat-rgp-bad
+      body:
+        policy: '{"when": {"request.path": "*"}}'
+        enforcement_level: mandatory
+    expect: {status: 400}
+  - id: rgp-acl-name-conflict
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/default
+      body:
+        policy: '{"when": {"request.path": "*"}}'
+        enforcement_level: hard-mandatory
+    expect: {status: 400}
+  - id: rgp-update
+    request:
+      method: POST
+      path: /v1/sys/policies/rgp/compat-rgp
+      body:
+        policy: '{"when": {"request.operation": "delete"}}'
+        enforcement_level: advisory
+    expect: {status: 204}
+  - id: rgp-read-updated
+    request: {method: GET, path: /v1/sys/policies/rgp/compat-rgp}
+    expect:
+      status: 200
+      exact:
+        data.enforcement_level: advisory
+  - id: rgp-delete
+    request: {method: DELETE, path: /v1/sys/policies/rgp/compat-rgp}
+    expect: {status: 204}
+  - id: rgp-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/rgp/compat-rgp}
+    expect: {status: 204}

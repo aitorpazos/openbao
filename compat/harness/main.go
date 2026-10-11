@@ -29,6 +29,7 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 	out := []Result{}
 	for _, s := range specs {
 		verdicts := map[string]string{}
+		capturedToken := ""
 		for _, c := range s.Cases {
 			r := Result{File: s.File, API: s.API, Feature: s.Feature, Case: c.ID}
 			for _, dep := range c.Depends {
@@ -39,7 +40,14 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 				}
 			}
 			if r.Verdict == "" {
-				r.Verdict, r.Status, r.Detail = runCase(client, target, token, s.Feature, c)
+				var verdict, newCaptured string
+				verdict, r.Status, r.Detail, newCaptured = runCase(client, target, token, capturedToken, s.Feature, c)
+				r.Verdict = verdict
+				// Only capture cases produce a token; other cases must not
+				// erase a previously captured one.
+				if newCaptured != "" {
+					capturedToken = newCaptured
+				}
 			}
 			verdicts[c.ID] = r.Verdict
 			out = append(out, r)
@@ -47,22 +55,27 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 	}
 	return out
 }
-func runCase(client *http.Client, target, token, feature string, c Case) (string, int, string) {
+
+// runCase executes one case. It returns the verdict, HTTP status, detail,
+// and the token captured from this response (auth.client_token) when the
+// case requests capture.
+func runCase(client *http.Client, target, token, capturedToken, feature string, c Case) (string, int, string, string) {
+	captured := ""
 	var payload []byte
 	if c.Request.Body.Kind != 0 {
 		var v any
 		if err := c.Request.Body.Decode(&v); err != nil {
-			return "ERROR", 0, err.Error()
+			return "ERROR", 0, err.Error(), captured
 		}
 		var err error
 		payload, err = json.Marshal(v)
 		if err != nil {
-			return "ERROR", 0, err.Error()
+			return "ERROR", 0, err.Error(), captured
 		}
 	}
 	req, err := http.NewRequest(c.Request.Method, strings.TrimRight(target, "/")+c.Request.Path, bytes.NewReader(payload))
 	if err != nil {
-		return "ERROR", 0, err.Error()
+		return "ERROR", 0, err.Error(), captured
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -70,12 +83,16 @@ func runCase(client *http.Client, target, token, feature string, c Case) (string
 	for k, v := range c.Request.Headers {
 		req.Header.Set(k, v)
 	}
-	if token != "" {
-		req.Header.Set("X-Vault-Token", token)
+	effectiveToken := token
+	if c.UseCapturedToken && capturedToken != "" {
+		effectiveToken = capturedToken
+	}
+	if effectiveToken != "" {
+		req.Header.Set("X-Vault-Token", effectiveToken)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "ERROR", 0, err.Error()
+		return "ERROR", 0, err.Error(), captured
 	}
 	defer resp.Body.Close()
 	status := resp.StatusCode
@@ -87,16 +104,16 @@ func runCase(client *http.Client, target, token, feature string, c Case) (string
 		}
 	}
 	if status == 404 && feature != "" && !expected404 {
-		return "FEATURE_ABSENT", status, "HTTP 404 (feature " + feature + ")"
+		return "FEATURE_ABSENT", status, "HTTP 404 (feature " + feature + ")", captured
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "ERROR", status, err.Error()
+		return "ERROR", status, err.Error(), captured
 	}
 	var body any
 	if len(bytes.TrimSpace(b)) != 0 {
 		if err = json.Unmarshal(b, &body); err != nil {
-			return "ERROR", status, "bad JSON: " + err.Error()
+			return "ERROR", status, "bad JSON: " + err.Error(), captured
 		}
 	}
 	accepted := false
@@ -106,24 +123,34 @@ func runCase(client *http.Client, target, token, feature string, c Case) (string
 		}
 	}
 	if !accepted {
-		return "FAIL", status, fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status)
+		return "FAIL", status, fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status), captured
 	}
 	if c.Expect.Body.Kind != 0 && len(b) != 0 {
-		return "FAIL", status, "expected empty body"
+		return "FAIL", status, "expected empty body", captured
 	}
-	if len(bytes.TrimSpace(b)) == 0 && (c.Expect.Schema != nil || len(c.Expect.Exact) > 0 || len(c.Expect.Errors) > 0) {
-		return "FAIL", status, "empty body cannot satisfy JSON assertions"
+	if len(bytes.TrimSpace(b)) == 0 && (c.Expect.Schema != nil || len(c.Expect.Exact) > 0 || len(c.Expect.Contains) > 0 || len(c.Expect.Errors) > 0) {
+		return "FAIL", status, "empty body cannot satisfy JSON assertions", captured
 	}
 	if err = validate(c.Expect.Schema, body, "$"); err != nil {
-		return "FAIL", status, err.Error()
+		return "FAIL", status, err.Error(), captured
 	}
 	if err = matchExact(c.Expect.Exact, body); err != nil {
-		return "FAIL", status, err.Error()
+		return "FAIL", status, err.Error(), captured
+	}
+	if err = matchContains(c.Expect.Contains, body); err != nil {
+		return "FAIL", status, err.Error(), captured
 	}
 	if err = matchErrors(c.Expect.Errors, body); err != nil {
-		return "FAIL", status, err.Error()
+		return "FAIL", status, err.Error(), captured
 	}
-	return "PASS", status, fmt.Sprintf("HTTP %d; all assertions matched", status)
+	if c.CaptureToken {
+		if authMap, ok := body.(map[string]any)["auth"].(map[string]any); ok {
+			if tok, ok := authMap["client_token"].(string); ok {
+				captured = tok
+			}
+		}
+	}
+	return "PASS", status, fmt.Sprintf("HTTP %d; all assertions matched", status), captured
 }
 func exitCode(results []Result, strict bool) int {
 	for _, r := range results {

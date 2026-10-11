@@ -28,6 +28,10 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/core.go` | +3 lines in `configureLogicalBackends`: transform engine factory registration | Mountable `transform` engine (additive builtin) | — |
 | `internal/vault/logical_system.go` | ha-status response: capitalized `Nodes` array (same entries as legacy lowercase `nodes`) gains per-node `redundancy_zone` — each node's own `autopilot_redundancy_zone` raft-storage label, learned by the active node over the echo channel; empty for unconfigured nodes and non-raft clusters | Documented Vault Enterprise /sys/ha-status shape (api-docs/system/ha-status, v2.x (latest)); lowercase `nodes` unchanged for OpenBao back-compat | — |
 | `internal/vault/core.go` | +2 lines: `PeerNode.RedundancyZone` field + copy from cached echo info | Zone labels for ha-status compat nodes | — |
+| `internal/vault/core.go` | +2 fields on `Core` (`sentinelStore`, `sentinelStoreLock`) + lazy init helper | Sentinel EGP/RGP store + per-core lock (fields in core.go because Core lacks an extension point) | — |
+| `internal/vault/core.go` | +1 hook call in `performPolicyChecks` (after step-up MFA block, before `ret.Allowed = true`): Sentinel EGP/RGP gate; on denial appends to `ret.Error`, sets `DeniedError` | Policy enforcement hook: EGP by request path, RGP by token policy names; advisory allows with warning, soft-mandatory honors `X-Vault-Policy-Override`, hard-mandatory denies. Root bypass is upstream (existing root check precedes the hook) | — |
+| `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.sentinelPaths()...)` | Registers `sys/policies/egp/*` + `sys/policies/rgp/*` CRUD paths | — |
+| `internal/http/logical.go` | +3 lines in `buildLogicalRequest` (after MFA header parse): `req.PolicyOverride` from `X-Vault-Policy-Override` header | Soft-mandatory override per documented Enterprise semantics | — |
 | `internal/vault/forwarding/request_forwarding_service.proto` (+regenerated `.pb.go`) | +1 field on EchoRequest: `raft_redundancy_zone = 12` | Echo channel carries each node's zone label so the active node can report cluster-wide zones | — |
 | `internal/vault/forwarding/request_forwarding_rpc.go` | Echo server handler stores `in.RaftRedundancyZone` in cache entry + `FollowerStates.Update`; client `tick()` sets the field from the raft backend | Same as above (wire path) | — |
 | `internal/physical/raft/raft.go` | +`redundancyZone` field, +`conf["autopilot_redundancy_zone"]` parse, +wiring in constructor, +`RedundancyZone()` getter | Source of a node's zone label (server config-file setting documented in Enterprise docs) | — |
@@ -67,3 +71,26 @@ period/skew/max_validation_attempts, replay rejection), named errors.
 Acceptance: `compat/specs/mfa/*` + live e2e (403 missing/invalid, 200 valid code,
 403 replay). Documented deviation: step-up failure = 403 errors[] (challenge shape
 undocumented in public docs).
+
+### Sentinel EGP/RGP (compat-harness branch)
+
+New packages/files (additive, port free): `internal/vault/sentinel/`
+(policy + store + declarative document evaluator, + tests),
+`internal/vault/logical_system_sentinel.go` (+ test), `internal/vault/core_sentinel.go`,
+`compat/specs/sentinel/*`, harness token-capture/`contains` support.
+Surface: `sys/policies/egp/<name>` and `sys/policies/rgp/<name>` CRUD
+(`policy`, `enforcement_level` ∈ advisory/soft-mandatory/hard-mandatory, `paths`
+for EGP as string or array; RGP rejects `paths`; list returns `keys` +
+`name_path_map`; base64 `policy` stored decoded so reads return the document).
+Enforcement: EGPs evaluated by request path (exact + prefix via trailing glob),
+RGPs by token policy names; evaluation order unauth → EGP, authed → ACL grant →
+RGP (token) → EGP (path); root bypass is upstream behavior. Advisory = allow with
+server warning; soft-mandatory = deny unless `X-Vault-Policy-Override: true`
+header; hard-mandatory = deny.
+**Documented deviation:** policy documents use a declarative condition subset of
+Sentinel (subjects: request.path/operation/data.*, token.policies/metadata.*;
+operators equals/not_equals/matches/in/contains/exists/numeric comparisons;
+combinators all/any/not), not the full Sentinel rule language — clean-room choice
+because the language itself is not part of the documented public API surface.
+Acceptance: `compat/specs/sentinel/*` + live dev server (full enforcement spec
+green; unauth EGP denial on a userpass login path verified manually).

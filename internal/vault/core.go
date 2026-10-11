@@ -62,6 +62,7 @@ import (
 	ident "github.com/openbao/openbao/v2/internal/vault/identity"
 	"github.com/openbao/openbao/v2/internal/vault/policy"
 	"github.com/openbao/openbao/v2/internal/vault/quotas"
+	"github.com/openbao/openbao/v2/internal/vault/sentinel"
 	"github.com/openbao/openbao/v2/internal/vault/routing"
 	vaultseal "github.com/openbao/openbao/v2/internal/vault/seal"
 	"github.com/openbao/openbao/v2/internal/version"
@@ -362,6 +363,12 @@ type Core struct {
 
 	// policy store is used to manage named ACL policies
 	policyStore *policy.Store
+
+	// sentinelStore holds the Sentinel-shaped governing policies (EGP/RGP)
+	// and their request-path evaluation cache. Lazy-initialized on first
+	// use; see core_sentinel.go.
+	sentinelStore     *sentinel.Store
+	sentinelStoreLock sync.Mutex
 
 	// token store is used to manage authentication tokens
 	tokenStore *TokenStore
@@ -4045,6 +4052,16 @@ func (c *Core) performPolicyChecks(ctx context.Context, acl *policy.ACL, te *log
 				return ret
 			}
 		}
+	}
+
+	// Sentinel-shaped gate: EGPs on the requested path (exact match plus
+	// prefix-matching EGPs on less-specific paths) and RGPs attached to the
+	// token must all pass according to their enforcement level. Root tokens
+	// already returned above; unauthenticated requests evaluate EGPs only.
+	if err := c.evaluateSentinelPolicies(ctx, req, te, opts.Unauth); err != nil {
+		ret.Error = multierror.Append(ret.Error, err)
+		ret.DeniedError = true
+		return ret
 	}
 
 	ret.Allowed = true

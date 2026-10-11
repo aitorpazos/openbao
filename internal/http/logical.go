@@ -269,6 +269,11 @@ func buildLogicalRequest(core *vault.Core, w http.ResponseWriter, r *http.Reques
 		return nil, http.StatusBadRequest, fmt.Errorf("failed to parse X-Vault-MFA header: %w", err)
 	}
 
+	// Documented Sentinel policy-override header: only soft-mandatory
+	// governing policies may be bypassed, and override requests are
+	// visible in the audit log (they carry the policy_override flag).
+	req.PolicyOverride = strings.EqualFold(r.Header.Get("X-Vault-Policy-Override"), "true")
+
 	return req, 0, nil
 }
 

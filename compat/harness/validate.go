@@ -162,6 +162,51 @@ func matchExact(exact map[string]any, body any) error {
 	}
 	return nil
 }
+
+// matchContains asserts that, at each dotted key, the response value is an
+// array containing every listed entry (list membership without ordering or
+// equality on the whole list).
+func matchContains(contains map[string]any, body any) error {
+	for _, key := range keys(contains) {
+		v := body
+		for _, part := range strings.Split(key, ".") {
+			obj, ok := v.(map[string]any)
+			if !ok {
+				return fmt.Errorf("contains %s: not an object", key)
+			}
+			var exists bool
+			v, exists = obj[part]
+			if !exists {
+				return fmt.Errorf("contains %s: missing", key)
+			}
+		}
+		arr, ok := v.([]any)
+		if !ok {
+			return fmt.Errorf("contains %s: expected array", key)
+		}
+		norm, err := normalize(contains[key])
+		if err != nil {
+			return err
+		}
+		want, ok := norm.([]any)
+		if !ok {
+			return fmt.Errorf("contains %s: expected array", key)
+		}
+		for _, w := range want {
+			found := false
+			for _, entry := range arr {
+				if reflect.DeepEqual(entry, w) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("contains %s: missing entry %v", key, w)
+			}
+		}
+	}
+	return nil
+}
 func matchErrors(patterns []string, body any) error {
 	if len(patterns) == 0 {
 		return nil
