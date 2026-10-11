@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MPL-2.0
+api: identity-scim-groups
+feature: scim
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/scim
+source_version: "v2.x (latest)"
+notes: |
+  Source: Group endpoints and Supported filters. Setup/authentication:
+  https://developer.hashicorp.com/vault/docs/enterprise/scim-overview,
+  v2.x (latest). Generic data-success 200 and invalid-input 400:
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes,
+  v2.x (latest). The SCIM page explicitly rejects other group filter operators.
+  Require Enterprise, activation and root-namespace entity-bound token for the
+  dedicated compat-scim-actor client with protocol ACLs. Preprovision its group
+  displayName compat-scim-group. Group read/list envelopes and SCIM error bodies
+  are not shown; no exact fields or error text are invented.
+  No mutation or per-file cleanup. Delete fixture group/user or dedicated actor
+  only AFTER all files; wait for asynchronous client cleanup. Real group CRUD,
+  member ownership and patch tests need dynamic resource IDs; see notes.md.
+cases:
+  - id: groups-list
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Groups
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: groups-filter-by-display-name
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Groups?filter=displayName%20eq%20%22compat-scim-group%22
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: groups-reject-unsupported-filter-operator
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Groups?filter=displayName%20ne%20%22compat-scim-group%22
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 400}

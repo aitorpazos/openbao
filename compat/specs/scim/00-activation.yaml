@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: MPL-2.0
+api: scim-activation-status
+feature: scim
+source: https://developer.hashicorp.com/vault/api-docs/system/activation-flags
+source_version: "v2.x (latest)"
+notes: |
+  Sources: the source page (ReadActivationFlags) and
+  https://developer.hashicorp.com/vault/docs/enterprise/scim-overview#activate-scim,
+  both v2.x (latest). Run in the root namespace on an initialized, unsealed,
+  appropriately licensed disposable Enterprise target with enable-scim ALREADY
+  activated. Activation is deliberately external setup: PUT
+  /v1/sys/activation-flags/enable-scim/activate is irreversible.
+  GET is explicitly unauthenticated. Status 200 derives from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes,
+  v2.x (latest). No named fixtures or cleanup; no activation writes in this file.
+  This is a setup check, not a dependency across spec files.
+cases:
+  - id: scim-activation-is-visible-without-token
+    no_auth: true
+    request: {method: GET, path: /v1/sys/activation-flags}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [activated, unactivated]
+            properties:
+              activated: {type: array, items: {type: string}}
+              unactivated: {type: array, items: {type: string}}
+      contains:
+        data.activated: [enable-scim]

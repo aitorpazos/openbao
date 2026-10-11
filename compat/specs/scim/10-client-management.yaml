@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MPL-2.0
+api: identity-scim-client-management
+feature: scim
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/scim
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: SCIM client endpoints, Path parameters, Request parameters.
+  Also https://developer.hashicorp.com/vault/docs/enterprise/scim-overview
+  (Configure a SCIM client), v2.x (latest). Standard management statuses and
+  errors schema: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response, v2.x (latest). No exact error wording is documented.
+  Require activation, Enterprise license and management ACLs in root namespace.
+  Preprovision compat-scim-actor as a client bound to the run token's entity;
+  it must remain throughout the suite. Reserve compat-scim-invalid exclusively,
+  initially absent, and reserve UUID 00000000-0000-0000-0000-000000000000 as an
+  entity ID which MUST NOT exist. No guessed successful-create principal ID.
+  The pre-existing actor makes LIST nonempty. Client read/list response fields
+  are not documented; assert only success, not a guessed data envelope.
+  Cleanup of compat-scim-invalid is unconditional. A buggy accepted write can
+  leave resources; deletion is asynchronous, so the operator must verify final
+  removal after the run. Do not delete compat-scim-actor until all files finish.
+  Positive create/update and immutable-accessor testing require dynamic entity
+  IDs/accessors unavailable in this harness; see notes.md rather than placeholders.
+cases:
+  - id: read-fixture-client
+    request: {method: GET, path: /v1/identity/scim/client/compat-scim-actor}
+    expect: {status: 200}
+  - id: list-clients
+    depends: [read-fixture-client]
+    request: {method: LIST, path: /v1/identity/scim/client}
+    expect: {status: 200}
+  - id: client-missing-principal
+    request:
+      method: POST
+      path: /v1/identity/scim/client/compat-scim-invalid
+      body: {}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: client-invalid-principal-type
+    request:
+      method: POST
+      path: /v1/identity/scim/client/compat-scim-invalid
+      body: {access_grant_principal: {invalid: true}}
+    expect: *invalid
+  - id: client-nonexistent-principal
+    request:
+      method: POST
+      path: /v1/identity/scim/client/compat-scim-invalid
+      body: {access_grant_principal: "00000000-0000-0000-0000-000000000000"}
+    expect: *invalid
+  - id: client-invalid-cleanup
+    request: {method: DELETE, path: /v1/identity/scim/client/compat-scim-invalid}
+    expect: {status: [200, 204, 404]}

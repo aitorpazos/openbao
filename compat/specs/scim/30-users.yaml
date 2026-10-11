@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: MPL-2.0
+api: identity-scim-users
+feature: scim
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/scim
+source_version: "v2.x (latest)"
+notes: |
+  Source: User endpoints, Supported filters, Sample create user payload.
+  Authentication/setup: https://developer.hashicorp.com/vault/docs/enterprise/scim-overview,
+  v2.x (latest). Status 200 for data and 400 for missing required inputs derive
+  from https://developer.hashicorp.com/vault/api-docs#http-status-codes,
+  v2.x (latest). Do not apply Vault LIST's empty-404 convention to SCIM GET.
+  Enterprise/activation required. Run as the entity-bound compat-scim-actor
+  client in root namespace with protocol ACLs. Preprovision a user owned by
+  that client: userName compat-scim-user, externalId compat-scim-external-user,
+  active true, so the read/filter success cases do not depend on empty results.
+  Reserve compat-scim-invalid-user and compat-scim-invalid-external exclusively
+  for malformed creates. SCIM error envelope/wording and list response shape
+  are not shown by these docs; no invented fields are asserted.
+  Valid user CRUD requires response ID capture absent from this harness.
+  If a malformed create incorrectly succeeds, the operator must remove that
+  resource via its returned ID or delete the dedicated actor client AFTER the
+  suite and wait for its asynchronous cleanup. Never use a shared client.
+cases:
+  - id: users-list
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Users
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: users-filter-by-name
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Users?filter=userName%20eq%20%22compat-scim-user%22
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: users-filter-by-external-id
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Users?filter=externalId%20eq%20%22compat-scim-external-user%22
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: users-filter-by-active
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Users?filter=active%20eq%20true
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: user-missing-external-id
+    request:
+      method: POST
+      path: /v1/identity/scim/v2/Users
+      headers: {Content-Type: application/scim+json}
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        userName: compat-scim-invalid-user
+        active: true
+    expect: {status: 400}
+  - id: user-missing-user-name
+    request:
+      method: POST
+      path: /v1/identity/scim/v2/Users
+      headers: {Content-Type: application/scim+json}
+      body:
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"]
+        externalId: compat-scim-invalid-external
+        active: true
+    expect: {status: 400}

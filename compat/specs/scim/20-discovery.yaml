@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MPL-2.0
+api: identity-scim-discovery
+feature: scim
+source: https://developer.hashicorp.com/vault/api-docs/secret/identity/scim
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Discovery endpoints, Authentication and Authorization,
+  Limitations. Also https://developer.hashicorp.com/vault/docs/enterprise/scim-overview
+  (Send SCIM requests), v2.x (latest), and
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes,
+  v2.x (latest), for generic successful-read status 200.
+  Enterprise license and prior activation required. Reserve preprovisioned
+  compat-scim-actor client; run token must resolve to its access_grant_principal
+  in root namespace and have ACL access to identity/scim/v2/*.
+  ServiceProviderConfig is explicitly unauthenticated; Schemas and ResourceTypes
+  are deliberately authenticated. Exact discovery response fields and resource
+  type IDs are not shown; no invented schemas or feature booleans are asserted.
+  /Me's 501 is specifically documented by SCIM, not inferred from the generic
+  API's unrelated uninitialized-server 501. Require initialized/unsealed target.
+  These requests are read-only; no cleanup. Remove actor only after all files.
+  Request media type follows the overview example. The harness cannot assert
+  the documented application/scim+json response Content-Type.
+cases:
+  - id: service-provider-config-without-authentication
+    no_auth: true
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/ServiceProviderConfig
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: schemas-discovery
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Schemas
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: resource-types-discovery
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/ResourceTypes
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 200}
+  - id: me-not-implemented
+    request:
+      method: GET
+      path: /v1/identity/scim/v2/Me
+      headers: {Content-Type: application/scim+json}
+    expect: {status: 501}
