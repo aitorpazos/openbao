@@ -19,6 +19,10 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/vault/core.go` | +3 registration lines: SAML/SCEP credential factories; OS logical factory with `vault-plugin-secrets-os` alias | Configuration-only auth methods and offline OS account storage, clean-room public docs | — |
+| `internal/builtin/logical/pki/backend.go` | +1 path registration: `pathConfigSCEP()` | Disabled PKI SCEP configuration round trips; protocol enrollment explicitly unavailable | — |
+| `internal/vault/logical_auth_os_test.go` (new) | SAML config/role validation and CRUD, SCEP role and PKI config round trips, OS host/account lifecycle and credential retention/reset/restore | Unit coverage for the clean-room auth/OS configuration subset, including fail-closed remote-operation requests | — |
+| `internal/vault/logical_auth_saml_scep.go`, `internal/vault/logical_os.go`, `internal/builtin/logical/pki/path_config_scep.go` (new) | Mount-local validated configuration, role CRUD, offline account credential versions/reset/restore | Public SAML/SCEP/OS API configuration subset; no browser login, enrollment, SSH or scheduler execution | — |
 | `internal/vault/core.go` | +1 factory registration: `logicalBackends["keymgmt"] = KeyMgmtBackendFactory` | Mount-local key management backend | — |
 | `internal/vault/logical_system.go` | +1 registration: `b.Paths = append(b.Paths, b.managedKeyPaths()...)` | Managed-key registry configuration CRUD | — |
 | `internal/vault/logical_keymgmt.go`, `internal/vault/logical_system_managed_keys.go` (new) | Local cryptographic key lifecycle, provider configuration, managed-key configuration validation and persistence | Clean-room public API compatibility; cloud/HSM operations and allowed-managed-key mount integration deferred, configuration writes warn explicitly | — |

@@ -1294,6 +1294,8 @@ func (c *Core) configureCredentialsBackends(backends map[string]logical.Factory,
 	}
 
 	c.credentialBackends = credentialBackends
+	c.credentialBackends["saml"] = SamlBackendFactory
+	c.credentialBackends["scep"] = ScepBackendFactory
 	c.credentialBackends["spiffe"] = spiffeFactory(true, c.redirectAddr)
 }
 
@@ -1312,6 +1314,7 @@ func (c *Core) configureLogicalBackends(backends map[string]logical.Factory, log
 
 	// Transform configuration resources.
 	logicalBackends["transform"] = TransformBackendFactory
+	logicalBackends["os"], logicalBackends["vault-plugin-secrets-os"] = OsEngineBackendFactory, OsEngineBackendFactory
 	logicalBackends["kmip"] = KMIPBackendFactory
 	logicalBackends["keymgmt"] = KeyMgmtBackendFactory
 	logicalBackends["spiffe"] = spiffeFactory(false, c.redirectAddr)
