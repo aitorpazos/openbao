@@ -19,6 +19,9 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/vault/logical_system_license_usage.go` (new) | Additive license/usage handlers with namespace checks, date/input validation and barrier-backed config | License-free status and documented response shapes; activity collection/export and KV/PKI/per-auth-lease measurement remain unavailable and are explicitly warned, not represented as measured utilization | — |
+| `internal/vault/logical_system_license_usage_test.go` (new) | Endpoint, invalid-input, namespace and no-op/persistence tests | Exercise license-free semantics, empty activity representation and config atomic validation/preservation | — |
+| `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.licenseUsagePaths()...)` | License-free status, utilization snapshot and internal-counter compatibility paths; existing entities path unchanged. Billing activity collection/export unavailable and explicitly warned; empty reports are not measured utilization | — |
 | `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.rotationOrphanPaths()...)` | Root-only GET rotation/orphans (optional trailing slash); no LDAP/OS-account scheduler exists, so orphan list is empty | — |
 | `internal/vault/logical_system_quotas.go` | group_by/secondary_rate field schemas, validation helper call, assignment before storage, readback fields | Identity quota configuration round-trip; request admission remains IP-based (entity and aggregate enforcement deferred) | — |
 | `internal/vault/quotas/quotas_rate_limit.go` | Persisted GroupBy/SecondaryRate fields, clone copies, legacy GroupBy default | Preserve grouping configuration across persistence and manager copies without changing existing limiter behavior | — |
