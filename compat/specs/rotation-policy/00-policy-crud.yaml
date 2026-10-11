@@ -1,0 +1,102 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-policies-rotation-crud
+feature: rotation-policy
+source: https://developer.hashicorp.com/vault/api-docs/system/policies-rotation
+source_version: "v2.x (latest)"
+notes: >-
+  Public docs specify /sys/policies/rotation/:name, not /sys/rotation-policy.
+  Appropriate Enterprise license required. Use a disposable target with an
+  administrative token. Reserve compat-rot-crud and compat-rot-invalid; neither
+  may preexist or be used by plugins. No external services or attached roles.
+  All cleanup requests are unconditional. Do not run concurrent copies.
+  Status codes and error schema additionally derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and
+  #error-response, both v2.x (latest). Missing required integer fields and
+  invalid integer objects use the general 400 contract. Unknown/deleted reads
+  use the general 404 contract. Dependencies skip FAIL but not FEATURE_ABSENT,
+  so these negative PASS results do not establish feature availability. Read examples show
+  two integer fields without a response envelope; read assertions intentionally
+  do not guess whether these are top-level or under data. Exact field read-back
+  awaits an unambiguous HTTP example. LIST, cron, status, rotate-now and mount
+  tune rotation_policy are not documented here; see notes.md for scope limits.
+cases:
+  - id: policy-missing-max-retries-per-cycle
+    request:
+      method: POST
+      path: /v1/sys/policies/rotation/compat-rot-invalid
+      body: {max_retry_cycles: 3}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: policy-missing-max-retry-cycles
+    request:
+      method: POST
+      path: /v1/sys/policies/rotation/compat-rot-invalid
+      body: {max_retries_per_cycle: 3}
+    expect: *invalid
+  - id: policy-missing-both-required-fields
+    request:
+      method: POST
+      path: /v1/sys/policies/rotation/compat-rot-invalid
+      body: {}
+    expect: *invalid
+  - id: policy-invalid-max-retries-per-cycle-type
+    request:
+      method: POST
+      path: /v1/sys/policies/rotation/compat-rot-invalid
+      body: {max_retries_per_cycle: {invalid: true}, max_retry_cycles: 3}
+    expect: *invalid
+  - id: policy-invalid-max-retry-cycles-type
+    request:
+      method: POST
+      path: /v1/sys/policies/rotation/compat-rot-invalid
+      body: {max_retries_per_cycle: 3, max_retry_cycles: {invalid: true}}
+    expect: *invalid
+  - id: policy-create
+    request:
+      method: POST
+      path: /v1/sys/policies/rotation/compat-rot-crud
+      body: {max_retries_per_cycle: 3, max_retry_cycles: 3}
+    expect: {status: [200, 204]}
+  - id: policy-read
+    depends: [policy-create]
+    request: {method: GET, path: /v1/sys/policies/rotation/compat-rot-crud}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: policy-read-unknown
+    depends: [policy-create]
+    request: {method: GET, path: /v1/sys/policies/rotation/compat-rot-unknown}
+    expect: &not-found
+      status: 404
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: policy-update
+    depends: [policy-create]
+    request:
+      method: POST
+      path: /v1/sys/policies/rotation/compat-rot-crud
+      body: {max_retries_per_cycle: 5, max_retry_cycles: 4}
+    expect: {status: [200, 204]}
+  - id: policy-read-updated
+    depends: [policy-create, policy-update]
+    request: {method: GET, path: /v1/sys/policies/rotation/compat-rot-crud}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: policy-delete
+    request: {method: DELETE, path: /v1/sys/policies/rotation/compat-rot-crud}
+    expect: {status: [200, 204]}
+  - id: policy-read-deleted
+    depends: [policy-create, policy-delete]
+    request: {method: GET, path: /v1/sys/policies/rotation/compat-rot-crud}
+    expect: *not-found
+  - id: policy-invalid-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/rotation/compat-rot-invalid}
+    expect: {status: [200, 204, 404]}
+  - id: policy-final-cleanup
+    request: {method: DELETE, path: /v1/sys/policies/rotation/compat-rot-crud}
+    expect: {status: [200, 204, 404]}
