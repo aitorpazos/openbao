@@ -153,8 +153,21 @@ func (c *Core) computeReplicationConstsState(perf *replicationModeState, dr *rep
 	var ret consts.ReplicationState
 
 	switch {
+	// No performance replication config in barrier state. Mirror the
+	// pre-existing in-tree semantics: a node of a non-replicated cluster
+	// still reports PerformancePrimary when active and PerformanceStandby
+	// when a standby. This matters for request forwarding: paths marked
+	// ForwardPerformanceStandby (e.g. sys/mfa/validate) are forwarded
+	// before their callbacks run whenever the processing node carries the
+	// ReplicationPerformanceStandby flag; reporting PerformanceDisabled
+	// here would make plain standbys execute those paths locally against
+	// read-only storage.
 	case perf == nil:
-		ret.AddState(consts.ReplicationPerformanceDisabled)
+		if active {
+			ret.AddState(consts.ReplicationPerformancePrimary)
+		} else {
+			ret.AddState(consts.ReplicationPerformanceStandby)
+		}
 	case perf.Mode == "primary":
 		if active {
 			ret.AddState(consts.ReplicationPerformancePrimary)

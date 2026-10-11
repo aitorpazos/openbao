@@ -137,6 +137,16 @@ keypair); `compat/specs/replication/*.yaml` 57/57 PASS on a fresh dev server (ha
 extended with `no_auth` case option for the documented unauthenticated status
 endpoints); two-server cross-cluster activation verified manually (token from primary
 activates a second server; secondary reports the primary's cluster_id).
+**Follow-up fix (regression):** `computeReplicationConstsState` now reports
+PerformancePrimary (active) / PerformanceStandby (standby) when the barrier holds no
+performance replication config, mirroring the pre-existing in-tree semantics
+(pristine ha.go hardcoded these). Reporting PerformanceDisabled on plain standbys
+broke every `ForwardPerformanceStandby: true` path — notably `sys/mfa/validate`,
+whose callback then executed locally on the standby, hit the read-only
+`PopMFAResponseAuthByID` guard, and had its ErrReadOnly masked into a 400
+"invalid request ID" instead of forwarding (flaky failure in
+TestLoginMfaGenerateTOTPTestAuditIncluded, whose final phase deliberately
+targets Cores[1], a standby).
 
 ### Namespaces (compat-namespaces branch)
 
