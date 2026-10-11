@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-config-ui-login-default-auth
+feature: enterprise-config
+source: https://developer.hashicorp.com/vault/api-docs/system/config-ui-login-default-auth
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Create, List, Read, Update and Delete GUI default login/auth
+  configuration. Appropriate Enterprise license required. Root or administrative
+  namespace only. Run with a root token on a disposable initialized, unsealed
+  target without a root-namespace login configuration. Reserve compat-ecfg-login
+  and compat-ecfg-invalid. Only one configuration per namespace; no concurrent runs.
+  Explicit namespace_path=root avoids guessing what the empty-string default means.
+  token needs no extra auth mounts; backup-only update tests conditional requiredness.
+  Status/error contracts additionally derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and #error-response,
+  v2.x (latest). No post-delete read status/default is specified by the endpoint page.
+  DELETE uses the method table, not the incomplete curl example. Cleanup is unconditional.
+cases:
+  - id: login-missing-auth-methods
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-invalid
+      body: {namespace_path: root}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: login-invalid-default-auth
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-invalid
+      body: {namespace_path: root, default_auth_type: compat-ecfg-invalid}
+    expect: *invalid
+  - id: login-invalid-backup-auth
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-invalid
+      body: {namespace_path: root, backup_auth_types: [compat-ecfg-invalid]}
+    expect: *invalid
+  - id: login-invalid-inheritance-type
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-invalid
+      body: {namespace_path: root, default_auth_type: token, disable_inheritance: {invalid: true}}
+    expect: *invalid
+  - id: login-invalid-fixture-cleanup
+    request: {method: DELETE, path: /v1/sys/config/ui/login/default-auth/compat-ecfg-invalid}
+    expect: {status: [200, 204, 404]}
+  - id: login-create-defaults
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login
+      body: {namespace_path: root, default_auth_type: token}
+    expect: {status: [200, 204]}
+  - id: login-read-defaults
+    depends: [login-create-defaults]
+    request: {method: GET, path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login}
+    expect:
+      status: 200
+      body_schema: &read-schema
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [default_auth_type, backup_auth_types, namespace_path, disable_inheritance]
+            properties:
+              default_auth_type: {type: string}
+              backup_auth_types: {type: array, items: {type: string}}
+              namespace_path: {type: string}
+              disable_inheritance: {type: boolean}
+      exact:
+        data.default_auth_type: token
+        data.backup_auth_types: []
+        data.namespace_path: root
+        data.disable_inheritance: false
+  - id: login-list-created
+    depends: [login-create-defaults]
+    request: {method: LIST, path: /v1/sys/config/ui/login/default-auth}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys, key_info]
+            properties:
+              keys: {type: array, items: {type: string}}
+              key_info: {type: object}
+      contains:
+        data.keys: [compat-ecfg-login]
+      exact:
+        data.key_info.compat-ecfg-login.name: compat-ecfg-login
+        data.key_info.compat-ecfg-login.namespace_path: root
+        data.key_info.compat-ecfg-login.disable_inheritance: false
+  - id: login-update-invalid-auth
+    depends: [login-create-defaults]
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login
+      body: {namespace_path: root, default_auth_type: compat-ecfg-invalid}
+    expect: *invalid
+  - id: login-update-inheritance
+    depends: [login-create-defaults]
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login
+      body: {namespace_path: root, default_auth_type: token, backup_auth_types: [], disable_inheritance: true}
+    expect: {status: [200, 204]}
+  - id: login-read-updated
+    depends: [login-create-defaults, login-update-inheritance]
+    request: {method: GET, path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login}
+    expect:
+      status: 200
+      body_schema: *read-schema
+      exact:
+        data.default_auth_type: token
+        data.backup_auth_types: []
+        data.namespace_path: root
+        data.disable_inheritance: true
+  - id: login-update-backup-only
+    depends: [login-create-defaults]
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login
+      body: {namespace_path: root, backup_auth_types: [token], disable_inheritance: false}
+    expect: {status: [200, 204]}
+  - id: login-read-backup-only
+    depends: [login-create-defaults, login-update-backup-only]
+    request: {method: GET, path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login}
+    expect:
+      status: 200
+      body_schema: {type: object}
+      exact:
+        data.backup_auth_types: [token]
+        data.namespace_path: root
+        data.disable_inheritance: false
+  - id: login-delete-cleanup
+    request: {method: DELETE, path: /v1/sys/config/ui/login/default-auth/compat-ecfg-login}
+    expect: {status: [200, 204]}

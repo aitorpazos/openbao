@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-config-ui-custom-messages
+feature: enterprise-config
+source: https://developer.hashicorp.com/vault/api-docs/system/config-ui-custom-messages
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: List and Create custom messages. Appropriate Enterprise license
+  required. Status/error contracts additionally derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and #error-response,
+  v2.x (latest). Run ONLY on a disposable initialized, unsealed dev target with a
+  root token, an initially empty message collection and no concurrent runs.
+  This file creates one server-ID fixture titled compat-ecfg-message. The harness
+  cannot capture data.id into subsequent paths; do not invent a client-selected ID.
+  Read/update/delete-by-ID are documented but blocked by this harness limitation.
+  Destroy the disposable target after running, or LIST and manually DELETE the ID
+  belonging to this title (also any unexpectedly accepted invalid fixtures).
+  Successful create asserts documented defaults, not contradictory sample values.
+  No timing-dependent active assertion or exact timestamp normalization is assumed.
+cases:
+  - id: messages-missing-title
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {message: "Y29tcGF0LWVjZmctbWVzc2FnZQ==", start_time: "2024-01-01T00:00:00Z"}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: messages-missing-message
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-invalid, start_time: "2024-01-01T00:00:00Z"}
+    expect: *invalid
+  - id: messages-missing-start-time
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-invalid, message: "Y29tcGF0LWVjZmctbWVzc2FnZQ=="}
+    expect: *invalid
+  - id: messages-invalid-type
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-invalid, message: "Y29tcGF0LWVjZmctbWVzc2FnZQ==", start_time: "2024-01-01T00:00:00Z", type: compat-ecfg-invalid}
+    expect: *invalid
+  - id: messages-invalid-base64
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-invalid, message: "%%%", start_time: "2024-01-01T00:00:00Z"}
+    expect: *invalid
+  - id: messages-invalid-start-time
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-invalid, message: "Y29tcGF0LWVjZmctbWVzc2FnZQ==", start_time: compat-ecfg-invalid}
+    expect: *invalid
+  - id: messages-invalid-end-time
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-invalid, message: "Y29tcGF0LWVjZmctbWVzc2FnZQ==", start_time: "2024-01-01T00:00:00Z", end_time: compat-ecfg-invalid}
+    expect: *invalid
+  - id: messages-invalid-authenticated-type
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-invalid, message: "Y29tcGF0LWVjZmctbWVzc2FnZQ==", start_time: "2024-01-01T00:00:00Z", authenticated: {invalid: true}}
+    expect: *invalid
+  - id: messages-create-defaults
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages
+      body: {title: compat-ecfg-message, message: "Y29tcGF0LWVjZmctbWVzc2FnZQ==", start_time: "2024-01-01T00:00:00Z"}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [id, active, start_time, end_time, type, authenticated]
+            properties:
+              id: {type: string}
+              active: {type: boolean}
+              start_time: {type: string}
+              end_time: {type: 'null'}
+              type: {type: string}
+              authenticated: {type: boolean}
+      exact:
+        data.type: banner
+        data.authenticated: true
+        data.end_time: null
+  - id: messages-list-created
+    depends: [messages-create-defaults]
+    request: {method: LIST, path: /v1/sys/config/ui/custom-messages}
+    expect: &listed
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys, key_info]
+            properties:
+              keys: {type: array, items: {type: string}}
+              key_info: {type: object}
+  - id: messages-list-default-filters
+    depends: [messages-create-defaults]
+    request: {method: LIST, path: '/v1/sys/config/ui/custom-messages?authenticated=true&type=banner'}
+    expect: *listed

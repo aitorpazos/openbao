@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-config-group-policy-application
+feature: enterprise-config
+source: https://developer.hashicorp.com/vault/api-docs/system/config-group-policy-application
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Get and Set group policy application information.
+  Status/error contracts: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response, v2.x (latest). Appropriate Enterprise license required.
+  Root or administrative namespace only; run with a root token on a disposable,
+  initialized, unsealed target whose mode is initially within_namespace_hierarchy.
+  This changes ACL policy application globally and is replicated to secondaries.
+  No concurrent users/runs. Cleanup resets the documented default, not prior state.
+  GET example omits the HTTP envelope; assert object without guessing field placement.
+  POST and PUT are documented; DELETE is not. Missing-field behavior is unspecified.
+cases:
+  - id: group-read-before-write
+    request: {method: GET, path: /v1/sys/config/group-policy-application}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: group-invalid-mode
+    request:
+      method: POST
+      path: /v1/sys/config/group-policy-application
+      body: {group_policy_application_mode: compat-ecfg-invalid}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: group-invalid-mode-type
+    request:
+      method: PUT
+      path: /v1/sys/config/group-policy-application
+      body: {group_policy_application_mode: {invalid: true}}
+    expect: *invalid
+  - id: group-post-any
+    request:
+      method: POST
+      path: /v1/sys/config/group-policy-application
+      body: {group_policy_application_mode: any}
+    expect: {status: [200, 204]}
+  - id: group-read-any
+    depends: [group-post-any]
+    request: {method: GET, path: /v1/sys/config/group-policy-application}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: group-put-hierarchy
+    request:
+      method: PUT
+      path: /v1/sys/config/group-policy-application
+      body: {group_policy_application_mode: within_namespace_hierarchy}
+    expect: {status: [200, 204]}
+  - id: group-read-hierarchy
+    depends: [group-put-hierarchy]
+    request: {method: GET, path: /v1/sys/config/group-policy-application}
+    expect: {status: 200, body_schema: {type: object}}
+  - id: group-reset-default-cleanup
+    request:
+      method: POST
+      path: /v1/sys/config/group-policy-application
+      body: {group_policy_application_mode: within_namespace_hierarchy}
+    expect: {status: [200, 204]}
