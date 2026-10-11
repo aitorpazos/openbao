@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: MPL-2.0
+api: agent-registry-negative-surface
+feature: agentic-iam
+source: https://developer.hashicorp.com/vault/api-docs/secret/agent-registry
+source_version: "v2.x (latest)"
+notes: |
+  Enterprise 2.1.0+ with an appropriate license. Administrative token, disposable
+  initialized/unsealed target, root namespace, initially empty agent registry.
+  Reserve compat-agentic-missing-entity and compat-agentic-missing-fields display
+  names; neither may preexist. The all-zero UUID must not identify any entity or
+  registration. No concurrent runs. Positive CRUD requires existing entity IDs,
+  which the harness cannot capture; see notes.md for the fixture-gated surface.
+  Generic 400/404 statuses and errors schema derive from
+  https://developer.hashicorp.com/vault/api-docs#http-status-codes and
+  #error-response, v2.x (latest). No exact error wording is specified.
+  Empty lists accept 200 or 404, status only. Unknown reads assert only 404.
+  Cleanup is unconditional and accepts 404: unlike OAuth profile deletion,
+  registry documentation does not promise deletion of absent records succeeds.
+  Missing-display-name uses a nonexistent entity too, so its 400 cannot isolate
+  which validation fired. Root ceiling rejection is fixture-gated for the same
+  reason; do not mistake a nonexistent-entity error for policy validation.
+cases:
+  - id: list-ids-empty
+    request: {method: LIST, path: /v1/agent-registry/registration/id}
+    expect: {status: [200, 404]}
+  - id: get-list-ids-empty
+    request: {method: GET, path: '/v1/agent-registry/registration/id?list=true'}
+    expect: {status: [200, 404]}
+  - id: list-display-names-empty
+    request: {method: LIST, path: /v1/agent-registry/registration/display-name}
+    expect: {status: [200, 404]}
+  - id: get-list-display-names-empty
+    request: {method: GET, path: '/v1/agent-registry/registration/display-name?list=true'}
+    expect: {status: [200, 404]}
+  - id: register-missing-fields
+    request: {method: POST, path: /v1/agent-registry/register, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: register-missing-entity-id
+    request:
+      method: POST
+      path: /v1/agent-registry/register
+      body: {display_name: compat-agentic-missing-fields}
+    expect: *invalid
+  - id: register-missing-display-name
+    request:
+      method: POST
+      path: /v1/agent-registry/register
+      body: {entity_id: '00000000-0000-0000-0000-000000000000'}
+    expect: *invalid
+  - id: register-nonexistent-entity
+    request:
+      method: POST
+      path: /v1/agent-registry/register
+      body:
+        display_name: compat-agentic-missing-entity
+        entity_id: '00000000-0000-0000-0000-000000000000'
+    expect: *invalid
+  - id: read-unknown-id
+    request: {method: GET, path: /v1/agent-registry/registration/id/00000000-0000-0000-0000-000000000000}
+    expect: {status: 404}
+  - id: read-unknown-display-name
+    request: {method: GET, path: /v1/agent-registry/registration/display-name/compat-agentic-unknown}
+    expect: {status: 404}
+  - id: read-unknown-entity-id
+    request: {method: GET, path: /v1/agent-registry/registration/entity-id/00000000-0000-0000-0000-000000000000}
+    expect: {status: 404}
+  - id: cleanup-missing-entity
+    request: {method: DELETE, path: /v1/agent-registry/registration/display-name/compat-agentic-missing-entity}
+    expect: {status: [200, 204, 404]}
+  - id: cleanup-missing-fields
+    request: {method: DELETE, path: /v1/agent-registry/registration/display-name/compat-agentic-missing-fields}
+    expect: {status: [200, 204, 404]}

@@ -1,0 +1,233 @@
+# SPDX-License-Identifier: MPL-2.0
+api: oauth-resource-server-profiles
+feature: agentic-iam
+source: https://developer.hashicorp.com/vault/api-docs/system/config-oauth-resource-server
+source_version: "v2.x (latest)"
+notes: |
+  Enterprise 2.1.0+ with an appropriate license. Run only on a disposable,
+  initialized, unsealed target with an administrative token, in root namespace.
+  Initially there must be no OAuth profiles. Reserve all compat-agentic-* names
+  and issuer URLs used below; no concurrent runs. No external IdP is required.
+  The RSA public key is locally generated test material; no private key is stored.
+  Generic statuses/errors: https://developer.hashicorp.com/vault/api-docs
+  (#http-status-codes and #error-response), v2.x (latest).
+  Empty lists accept 200 or 404 without body assertions. Unknown reads use the
+  generic 404 contract; error wording is deliberately not asserted.
+  Create returns 204, not a generated ID in a creation response. GET by name
+  exposes config_id, but the harness cannot capture arbitrary response fields.
+  Positive ID-addressed reads and namespace isolation are fixture-gated (notes.md).
+  Unconditional cleanup is at the end; dependencies are same-file only.
+cases:
+  - id: list-empty
+    request: {method: LIST, path: /v1/sys/config/oauth-resource-server}
+    expect: {status: [200, 404]}
+  - id: get-list-empty
+    request: {method: GET, path: '/v1/sys/config/oauth-resource-server?list=true'}
+    expect: {status: [200, 404]}
+  - id: missing-issuer
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid
+      body:
+        use_jwks: false
+        public_keys: &keys
+          - key_id: compat-agentic-key
+            pem: |
+              -----BEGIN PUBLIC KEY-----
+              MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAi9ymrOUuE38WQ/tq9PGY
+              tHxx3JAh5pm3sKSkJekzMmX+GLljuPtTAg6NPXSru8AzvKG5PaRRtaGkv8+h73Ve
+              bqumlgQ+0ygUUgSQ7PB7mZYAzlw56Ydl5JP7aml1Ar73K1XFIFMjuS1GE2VjC24Y
+              +qRsxJ4DCLtbCCgU+blZjN32PqGup7JgQMmSsh1IzT6BR5G9jNN21U1o8lEzlld5
+              vCVvKM8EJmWlLtfS1DILRq++CAD4AenPRuLkH2nE1KM9rAxwJap8jU7LdcRPoSpN
+              /x1vIOvGLA9sc32lIyVU3v+Z3qkiPJzUQt1XvQNe7JbCungvB7FM+XxZgttb0eKU
+              MwIDAQAB
+              -----END PUBLIC KEY-----
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: missing-static-keys
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid
+      body: {issuer_id: 'https://compat-agentic-invalid.example', use_jwks: false}
+    expect: *invalid
+  - id: invalid-pem
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid
+      body:
+        issuer_id: https://compat-agentic-invalid.example
+        use_jwks: false
+        public_keys: [{key_id: compat-agentic-key, pem: not-a-pem-key}]
+    expect: *invalid
+  - id: missing-jwks-uri
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid
+      body: {issuer_id: 'https://compat-agentic-invalid.example', use_jwks: true}
+    expect: *invalid
+  - id: static-rejects-jwks-uri
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid
+      body:
+        issuer_id: https://compat-agentic-invalid.example
+        use_jwks: false
+        public_keys: *keys
+        jwks_uri: https://127.0.0.1:1/compat-agentic-jwks
+    expect: *invalid
+  - id: jwks-rejects-static-keys
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid
+      body:
+        issuer_id: https://compat-agentic-invalid.example
+        use_jwks: true
+        public_keys: *keys
+        jwks_uri: https://127.0.0.1:1/compat-agentic-jwks
+    expect: *invalid
+  - id: invalid-jwt-type
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid
+      body:
+        issuer_id: https://compat-agentic-invalid.example
+        use_jwks: false
+        public_keys: *keys
+        jwt_type: id_token
+    expect: *invalid
+  - id: create-static
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-static
+      body:
+        issuer_id: https://COMPAT-AGENTIC-STATIC.EXAMPLE///
+        use_jwks: false
+        public_keys: *keys
+        audiences: [compat-agentic-vault]
+        supported_algorithms: [RS256]
+        unique_id_claim: jti
+        actor_claim: act.sub
+    expect: {status: [200, 204]}
+  - id: read-static-normalized-defaults
+    depends: [create-static]
+    request: {method: GET, path: /v1/sys/config/oauth-resource-server/compat-agentic-static}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [config_id]
+            properties:
+              config_id: {type: string}
+      exact:
+        data.profile_name: compat-agentic-static
+        data.issuer_id: https://compat-agentic-static.example
+        data.use_jwks: false
+        data.public_keys: *keys
+        data.audiences: [compat-agentic-vault]
+        data.supported_algorithms: [RS256]
+        data.user_claim: sub
+        data.jwt_type: access_token
+        data.clock_skew_leeway: 0
+        data.enabled: true
+        data.no_default_policy: false
+        data.optional_authorization_details: false
+  - id: list-populated
+    depends: [create-static]
+    request: {method: LIST, path: /v1/sys/config/oauth-resource-server}
+    expect: {status: 200, contains: {data.keys: [compat-agentic-static]}}
+  - id: get-list-populated
+    depends: [create-static]
+    request: {method: GET, path: '/v1/sys/config/oauth-resource-server?list=true'}
+    expect: {status: 200, contains: {data.keys: [compat-agentic-static]}}
+  - id: duplicate-normalized-issuer
+    depends: [create-static]
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-duplicate
+      body:
+        issuer_id: https://compat-agentic-static.example/
+        use_jwks: false
+        public_keys: *keys
+    expect: *invalid
+  - id: immutable-issuer
+    depends: [create-static]
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-static
+      body: {issuer_id: 'https://compat-agentic-changed.example'}
+    expect: *invalid
+  - id: immutable-unique-id-claim
+    depends: [create-static]
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-static
+      body: {unique_id_claim: compat_agentic_id}
+    expect: *invalid
+  - id: unchanged-immutable-fields-accepted
+    depends: [create-static]
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-static
+      body: {issuer_id: 'https://compat-agentic-static.example', unique_id_claim: jti}
+    expect: {status: [200, 204]}
+  - id: partial-update
+    depends: [create-static]
+    request:
+      method: POST
+      path: /v1/sys/config/oauth-resource-server/compat-agentic-static
+      body: {audiences: [compat-agentic-updated], clock_skew_leeway: 60, enabled: false, no_default_policy: true, optional_authorization_details: true, user_claim: compat_agentic_subject}
+    expect: {status: [200, 204]}
+  - id: read-updated-preserves-omitted-fields
+    depends: [create-static, partial-update]
+    request: {method: GET, path: /v1/sys/config/oauth-resource-server/compat-agentic-static}
+    expect:
+      status: 200
+      exact:
+        data.profile_name: compat-agentic-static
+        data.issuer_id: https://compat-agentic-static.example
+        data.use_jwks: false
+        data.public_keys: *keys
+        data.supported_algorithms: [RS256]
+        data.jwt_type: access_token
+        data.audiences: [compat-agentic-updated]
+        data.clock_skew_leeway: 60
+        data.enabled: false
+        data.no_default_policy: true
+        data.optional_authorization_details: true
+        data.user_claim: compat_agentic_subject
+  - id: read-unknown-name
+    depends: [create-static]
+    request: {method: GET, path: /v1/sys/config/oauth-resource-server/compat-agentic-unknown}
+    expect: {status: 404}
+  - id: read-unknown-id
+    depends: [create-static]
+    request: {method: GET, path: /v1/sys/config/oauth-resource-server/id/00000000-0000-0000-0000-000000000000}
+    expect: {status: 404}
+  - id: delete-static
+    request: {method: DELETE, path: /v1/sys/config/oauth-resource-server/compat-agentic-static}
+    expect: {status: [200, 204]}
+  - id: read-deleted
+    depends: [create-static, delete-static]
+    request: {method: GET, path: /v1/sys/config/oauth-resource-server/compat-agentic-static}
+    expect: {status: 404}
+  - id: delete-static-again-idempotent
+    request: {method: DELETE, path: /v1/sys/config/oauth-resource-server/compat-agentic-static}
+    expect: {status: [200, 204]}
+  - id: cleanup-invalid
+    request: {method: DELETE, path: /v1/sys/config/oauth-resource-server/compat-agentic-invalid}
+    expect: {status: [200, 204]}
+  - id: cleanup-duplicate
+    request: {method: DELETE, path: /v1/sys/config/oauth-resource-server/compat-agentic-duplicate}
+    expect: {status: [200, 204]}
+  - id: cleanup-static
+    request: {method: DELETE, path: /v1/sys/config/oauth-resource-server/compat-agentic-static}
+    expect: {status: [200, 204]}
