@@ -1316,6 +1316,7 @@ func (c *Core) configureLogicalBackends(backends map[string]logical.Factory, log
 	logicalBackends["spiffe"] = spiffeFactory(false, c.redirectAddr)
 
 	// Cubbyhole
+	logicalBackends["agent-registry"] = c.agentRegistryFactory
 	logicalBackends[routing.MountTypeCubbyhole] = CubbyholeBackendFactory
 	logicalBackends[routing.MountTypeNSCubbyhole] = func(ctx context.Context, config *logical.BackendConfig) (logical.Backend, error) {
 		if c.cubbyholeBackend != nil {

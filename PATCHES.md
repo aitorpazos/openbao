@@ -19,6 +19,9 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/vault/logical_system.go` | +1 path registration: `b.oauthResourceServerPaths()` | Namespace-scoped OAuth resource server configuration API (configuration only; JWT authentication deferred) | — |
+| `internal/vault/core.go` | +1 factory registration: `logicalBackends["agent-registry"] = c.agentRegistryFactory` | Agent registry backend at documented root-level path | — |
+| `internal/vault/mount.go` | Required agent-registry mount helper call; backfill helper in mount upgrades for preexisting namespaces; protected/untunable/singleton entries | Expose `/agent-registry/` in each namespace through normal ACL-aware routing, without HTTP or request-handling rewrites | — |
 | `internal/vault/logical_system.go` | +2 lines: `"activation-flags"` in the system backend's `Unauthenticated` special-paths list; `b.Paths = append(b.Paths, b.activationFlagPaths()...)` registration | Documents GET `/sys/activation-flags` as readable without auth and registers the activation-flags root (GET status + one-way PUT `enable-scim/activate`) required by the SCIM feature gate | — |
 | `internal/vault/identity/store.go` | +3 narrow seams in `NewIdentityStore`: `"scim/v2/ServiceProviderConfig"` in `Unauthenticated` special paths, `iStore.SCIMCleanup(ctx)` in the periodic hook, `scimPaths(i)` in `paths()` | Registers SCIM protocol/client endpoints on the identity store; documents unauthenticated service discovery; periodic cleanup of asynchronously-deleting clients | — |
 | `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.rotationPolicyPaths()...)` | Registers root-namespace rotation-policy POST/GET/DELETE configuration API; LDAP static-role and OS-account assignment/scheduler integration deferred | — |

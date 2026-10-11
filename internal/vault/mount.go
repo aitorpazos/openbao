@@ -57,6 +57,7 @@ var (
 
 	// protectedMounts cannot be remounted
 	protectedMounts = []string{
+		"agent-registry/",
 		"audit/",
 		"auth/",
 		routing.MountPathSystem,
@@ -65,6 +66,7 @@ var (
 	}
 
 	untunableMounts = []string{
+		"agent-registry/",
 		routing.MountPathCubbyhole,
 		routing.MountPathSystem,
 		"audit/",
@@ -74,6 +76,7 @@ var (
 	// singletonMounts can only exist in one location and are
 	// loaded by default. These are types, not paths.
 	singletonMounts = []string{
+		"agent-registry",
 		routing.MountTypeCubbyhole,
 		routing.MountTypeNSCubbyhole,
 		routing.MountTypeSystem,
@@ -1134,6 +1137,13 @@ func (c *Core) runMountUpdates(ctx context.Context, barrier logical.Storage, nee
 		}
 	}
 
+	// Backfill the newly required registry in namespaces created before this feature.
+	addedRegistries, err := c.ensureAgentRegistryMounts(ctx)
+	if err != nil {
+		return err
+	}
+	needPersist = needPersist || addedRegistries
+
 	// Upgrade to table-scoped entries
 	for _, entry := range c.mounts.Entries {
 		if entry.Type == routing.MountTypeNSCubbyhole && !entry.Local {
@@ -1819,6 +1829,11 @@ func (c *Core) requiredMountTable(ctx context.Context) (*routing.MountTable, err
 	table.Entries = append(table.Entries, cubbyholeMount)
 	table.Entries = append(table.Entries, sysMount)
 	table.Entries = append(table.Entries, identityMount)
+	agentMount, err := c.agentRegistryMount(ns)
+	if err != nil {
+		return nil, err
+	}
+	table.Entries = append(table.Entries, agentMount)
 
 	return table, nil
 }
