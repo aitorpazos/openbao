@@ -1,0 +1,218 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-internal-counters
+feature: license-usage
+source: https://developer.hashicorp.com/vault/api-docs/system/internal-counters
+source_version: "v2.x (latest)"
+notes: |
+  Sources: Entities; Client count; Cumulative namespace client count; Partial month
+  client count; Update/Read the client count configuration; Activity export.
+  Status/error contracts: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response, v2.x (latest). Use a root token in the root namespace on an
+  initialized, unsealed Enterprise reference with yearly billing, counting enabled,
+  queryable retained activity, and completed background client-data loading. The
+  historical query fixtures require retained activity in the billing period containing
+  June 2025. Cumulative is Enterprise tech preview; export is tech preview and needs sudo.
+  No fixed counts, billing boundaries, namespace order or current-month estimates
+  are asserted. Activity uses array by_namespace; cumulative uses object by_namespace.
+  The documented configuration path is /sys/internal/counters/config, with POST,
+  not PUT /activity/config. Empty POST preserves every omitted setting; invalid
+  requests must not change state. No disabling or retention-reducing valid writes.
+  Export success returns JSON lines or CSV, unsupported by the harness's unconditional
+  single-JSON response decoder; only documented-input validation is executable here.
+  No /activity/query endpoint is documented. See notes.md for source inconsistencies.
+cases:
+  - id: counters-entities-read
+    request: {method: GET, path: /v1/sys/internal/counters/entities}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [counters]
+            properties:
+              counters:
+                type: object
+                required: [entities]
+                properties:
+                  entities:
+                    type: object
+                    required: [total]
+                    properties:
+                      total: {type: integer}
+  - id: activity-read-current-billing-period
+    request: {method: GET, path: /v1/sys/internal/counters/activity}
+    expect: &activity-response
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [start_time, end_time, total, by_namespace, months]
+            properties:
+              start_time: {type: string}
+              end_time: {type: string}
+              total: &counts
+                type: object
+                required: [entity_clients, non_entity_clients, clients, secret_syncs, acme_clients]
+                properties:
+                  entity_clients: {type: integer}
+                  non_entity_clients: {type: integer}
+                  clients: {type: integer}
+                  secret_syncs: {type: integer}
+                  acme_clients: {type: integer}
+              by_namespace: &namespaces
+                type: array
+                items:
+                  type: object
+                  required: [namespace_id, namespace_path, counts, mounts]
+                  properties:
+                    namespace_id: {type: string}
+                    namespace_path: {type: string}
+                    counts: *counts
+                    mounts:
+                      type: array
+                      items:
+                        type: object
+                        required: [counts]
+                        properties:
+                          mount_path: {type: string}
+                          mount_type: {type: string}
+                          counts:
+                            type: object
+                            required: [entity_clients, non_entity_clients, clients]
+                            properties:
+                              entity_clients: {type: integer}
+                              non_entity_clients: {type: integer}
+                              clients: {type: integer}
+                              secret_syncs: {type: integer}
+                              acme_clients: {type: integer}
+              months: &months
+                type: array
+                items:
+                  type: object
+                  required: [timestamp, counts, namespaces, new_clients]
+                  properties:
+                    timestamp: {type: string}
+                    counts: *counts
+                    namespaces: *namespaces
+                    new_clients:
+                      type: object
+                      required: [counts, namespaces]
+                      properties:
+                        counts: *counts
+                        namespaces: *namespaces
+  - id: activity-read-rfc3339-range-top-namespaces
+    request:
+      method: GET
+      path: /v1/sys/internal/counters/activity?start_time=2025-06-01T00%3A00%3A00Z&end_time=2025-06-30T00%3A00%3A00Z&limit_namespaces=2
+    expect: *activity-response
+  - id: activity-read-unix-range
+    request:
+      method: GET
+      path: /v1/sys/internal/counters/activity?start_time=1748736000&end_time=1751241600
+    expect: *activity-response
+  - id: activity-invalid-start-time
+    request: {method: GET, path: '/v1/sys/internal/counters/activity?start_time=compat-lic-invalid-date'}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: activity-cumulative-read
+    request: {method: GET, path: /v1/sys/internal/counters/activity/cumulative}
+    expect: &cumulative-response
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [start_time, end_time, total, by_namespace]
+            properties:
+              start_time: {type: string}
+              end_time: {type: string}
+              total: *counts
+              by_namespace: {type: object}
+  - id: activity-cumulative-read-rfc3339-range
+    request:
+      method: GET
+      path: /v1/sys/internal/counters/activity/cumulative?start_time=2025-06-01T00%3A00%3A00Z&end_time=2025-06-30T00%3A00%3A00Z
+    expect: *cumulative-response
+  - id: activity-monthly-read
+    request: {method: GET, path: /v1/sys/internal/counters/activity/monthly}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [entity_clients, non_entity_clients, clients, secret_syncs, acme_clients, by_namespace, months]
+            properties:
+              entity_clients: {type: integer}
+              non_entity_clients: {type: integer}
+              clients: {type: integer}
+              secret_syncs: {type: integer}
+              acme_clients: {type: integer}
+              by_namespace: *namespaces
+              months: *months
+  - id: counters-config-read
+    request: {method: GET, path: /v1/sys/internal/counters/config}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [enabled, queries_available, retention_months, reporting_enabled, billing_start_timestamp]
+            properties:
+              enabled: {type: string}
+              queries_available: {type: boolean}
+              retention_months: {type: integer}
+              reporting_enabled: {type: boolean}
+              billing_start_timestamp: {type: string}
+  - id: counters-config-preserve-omitted-settings
+    request:
+      method: POST
+      path: /v1/sys/internal/counters/config
+      body: {}
+    expect: {status: [200, 204]}
+  - id: counters-config-invalid-enabled
+    request:
+      method: POST
+      path: /v1/sys/internal/counters/config
+      body: {enabled: compat-lic-invalid}
+    expect: *invalid
+  - id: counters-config-retention-below-minimum
+    request:
+      method: POST
+      path: /v1/sys/internal/counters/config
+      body: {retention_months: 47}
+    expect: *invalid
+  - id: counters-config-retention-above-maximum
+    request:
+      method: POST
+      path: /v1/sys/internal/counters/config
+      body: {retention_months: 61}
+    expect: *invalid
+  - id: activity-export-invalid-format
+    request:
+      method: GET
+      path: /v1/sys/internal/counters/activity/export?start_time=2025-06-01T00%3A00%3A00Z&end_time=2025-06-30T00%3A00%3A00Z&format=compat-lic-invalid
+    expect: *invalid
+  - id: activity-export-invalid-end-time
+    request:
+      method: GET
+      path: /v1/sys/internal/counters/activity/export?start_time=2025-06-01T00%3A00%3A00Z&end_time=compat-lic-invalid-date&format=json
+    expect: *invalid

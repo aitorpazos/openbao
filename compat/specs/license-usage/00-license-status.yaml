@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-license-status
+feature: license-usage
+source: https://developer.hashicorp.com/vault/api-docs/system/license
+source_version: "v2.x (latest)"
+notes: |
+  Source: License status and both license issuer sample responses.
+  HTTP status contract: https://developer.hashicorp.com/vault/api-docs#http-status-codes,
+  v2.x (latest). Requires an initialized, unsealed Enterprise reference with an
+  autoloaded license and administrative root token. This is a read-only shape
+  contract, not a requirement that license-free OpenBao enforce commercial licensing.
+  The documented path is /sys/license/status, NOT /sys/license. No install/delete
+  CRUD or unsupported-method negatives are inferred. Issuer, features, dates and
+  license identifiers are deployment-specific; no sample values are asserted.
+cases:
+  - id: license-status-read
+    request: {method: GET, path: /v1/sys/license/status}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [autoloading_used, autoloaded, persisted_autoload]
+            properties:
+              autoloading_used: {type: boolean}
+              autoloaded: &license
+                type: object
+                required: [add_ons, architecture, edition, expiration_time, features, issuer, license_id, os, performance_standby_count, start_time, termination_time]
+                properties:
+                  add_ons: {type: string}
+                  architecture: {type: array, items: {type: string}}
+                  edition: {type: string}
+                  expiration_time: {type: string}
+                  features: {type: array, items: {type: string}}
+                  issuer: {type: string}
+                  license_id: {type: string}
+                  os: {type: array, items: {type: string}}
+                  performance_standby_count: {type: integer}
+                  start_time: {type: string}
+                  termination_time: {type: string}
+              persisted_autoload: *license

@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-utilization-report
+feature: license-usage
+source: https://developer.hashicorp.com/vault/api-docs/system/utilization-report
+source_version: "v2.x (latest)"
+notes: |
+  Source: Get utilization report and sample response. Enterprise; root or
+  administrative namespace only. Use an administrative root token on an initialized,
+  unsealed reference. HTTP statuses: https://developer.hashicorp.com/vault/api-docs#http-status-codes,
+  v2.x (latest). This is a cluster-wide snapshot, not a date-range report: no
+  duration, end-date or other parameters are documented. Assert sample field types,
+  not deployment-specific counts or mount names. The sample global lease quota
+  is optional in this schema because the fixture need not configure a global quota.
+cases:
+  - id: utilization-report-read
+    request: {method: GET, path: /v1/sys/utilization-report}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [auth_methods, kvv1_secrets, kvv2_secrets, lease_count_quotas, leases_by_auth_method, namespaces, pki, replication_status, secret_engines]
+            properties:
+              auth_methods: {type: object}
+              kvv1_secrets: {type: integer}
+              kvv2_secrets: {type: integer}
+              lease_count_quotas:
+                type: object
+                required: [total_lease_count_quotas]
+                properties:
+                  total_lease_count_quotas: {type: integer}
+                  global_lease_count_quota:
+                    type: object
+                    required: [capacity, count, name]
+                    properties:
+                      capacity: {type: integer}
+                      count: {type: integer}
+                      name: {type: string}
+              leases_by_auth_method: {type: object}
+              namespaces: {type: integer}
+              pki:
+                type: object
+                required: [total_issuers, total_roles]
+                properties:
+                  total_issuers: {type: integer}
+                  total_roles: {type: integer}
+              replication_status:
+                type: object
+                required: [dr_primary, dr_state, pr_primary, pr_state]
+                properties:
+                  dr_primary: {type: boolean}
+                  dr_state: {type: string}
+                  pr_primary: {type: boolean}
+                  pr_state: {type: string}
+              secret_engines: {type: object}
