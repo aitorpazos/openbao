@@ -79,6 +79,9 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
+		if c.Request.Method == http.MethodPatch {
+			req.Header.Set("Content-Type", "application/merge-patch+json")
+		}
 	}
 	for k, v := range c.Request.Headers {
 		req.Header.Set(k, v)
