@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: MPL-2.0
+api: raft-autopilot-disable-upgrade-migration
+feature: autopilot-config
+source: https://developer.hashicorp.com/vault/api-docs/system/storage/raftautopilot
+source_version: "v2.x (latest)"
+notes: |
+  Additional source: https://developer.hashicorp.com/vault/api-docs (v2.x (latest)),
+  success/error status conventions. Requires initialized, unsealed Integrated Storage,
+  root namespace, administrative token, and Enterprise-compatible configuration fields.
+  Disposable fresh cluster ONLY: changes disable_upgrade_migration to true then false;
+  no capture/restore of an arbitrary pre-existing value. Fresh default is documented false.
+  GET uses the top-level sample shape, not an invented data envelope. These tests extend
+  redundancy/ state coverage without duplicating it. No redundancy-zone label parameter
+  is documented by this configuration API. No actual automated upgrade is performed.
+  Write success alone is insufficient: each boolean value must be observable on GET.
+cases:
+  - id: configuration-default-and-shape
+    request: {method: GET, path: /v1/sys/storage/raft/autopilot/configuration}
+    expect: &configuration-default
+      status: 200
+      exact: {disable_upgrade_migration: false}
+      body_schema: &configuration-schema
+        type: object
+        required: [cleanup_dead_servers, dead_server_last_contact_threshold, last_contact_threshold, max_trailing_logs, min_quorum, server_stabilization_time, disable_upgrade_migration]
+        properties:
+          cleanup_dead_servers: {type: boolean}
+          dead_server_last_contact_threshold: {type: string}
+          last_contact_threshold: {type: string}
+          max_trailing_logs: {type: integer}
+          min_quorum: {type: integer}
+          server_stabilization_time: {type: string}
+          disable_upgrade_migration: {type: boolean}
+  - id: disable-upgrade-migration
+    request: {method: POST, path: /v1/sys/storage/raft/autopilot/configuration, body: {disable_upgrade_migration: true}}
+    expect: {status: [200, 204]}
+  - id: read-disabled-upgrade-migration
+    depends: [disable-upgrade-migration]
+    request: {method: GET, path: /v1/sys/storage/raft/autopilot/configuration}
+    expect:
+      status: 200
+      body_schema: *configuration-schema
+      exact: {disable_upgrade_migration: true}
+  - id: enable-upgrade-migration
+    request: {method: POST, path: /v1/sys/storage/raft/autopilot/configuration, body: {disable_upgrade_migration: false}}
+    expect: {status: [200, 204]}
+  - id: read-enabled-upgrade-migration
+    depends: [enable-upgrade-migration]
+    request: {method: GET, path: /v1/sys/storage/raft/autopilot/configuration}
+    expect: *configuration-default
+  - id: reject-nonboolean-upgrade-migration
+    request: {method: POST, path: /v1/sys/storage/raft/autopilot/configuration, body: {disable_upgrade_migration: not-a-boolean}}
+    expect:
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}

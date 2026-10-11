@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: MPL-2.0
+api: dr-operation-token-route-validation
+feature: dr-ops
+source: https://developer.hashicorp.com/vault/api-docs/system/replication/replication-dr
+source_version: "v2.x (latest)"
+notes: |
+  Additional source: https://developer.hashicorp.com/vault/api-docs (v2.x (latest)),
+  HTTP status codes and error envelope. Disposable initialized/unsealed DR secondary,
+  root namespace, supported administrative token. enable_unauthenticated_access MUST
+  NOT include generate-operation-token for the no-auth 403 cases. Latest docs make
+  these endpoints conditionally unauthenticated, not universally public.
+  Route/schema/validation only: no real key shares, token issuance, promotion, reindex,
+  or Merkle repair. DELETE attempt cancels any existing attempt: isolated fixture ONLY.
+  An empty start body is VALID (pgp_key is optional), so start validation uses an
+  invalid base64 PGP key, not a fabricated required OTP. No exact error text asserted.
+  Revocation is POST secondary/operation-token/delete, NOT generate-operation-token/delete;
+  the docs do not define a DELETE revocation method. See notes.md for fixture caveats.
+cases:
+  - id: attempt-read-shape
+    request: {method: GET, path: /v1/sys/replication/dr/secondary/generate-operation-token/attempt}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [started, nonce, progress, required, encoded_token, pgp_fingerprint, complete]
+        properties:
+          started: {type: boolean}
+          nonce: {type: string}
+          progress: {type: integer}
+          required: {type: integer}
+          encoded_token: {type: string}
+          pgp_fingerprint: {type: string}
+          complete: {type: boolean}
+  - id: attempt-start-invalid-pgp
+    request:
+      method: POST
+      path: /v1/sys/replication/dr/secondary/generate-operation-token/attempt
+      body: {pgp_key: '!!!not-base64!!!'}
+    expect: &invalid-input
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: attempt-cancel
+    request: {method: DELETE, path: /v1/sys/replication/dr/secondary/generate-operation-token/attempt}
+    expect: {status: [200, 204]}
+  - id: update-missing-key-and-nonce
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/generate-operation-token/update, body: {}}
+    expect: *invalid-input
+  - id: update-missing-key
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/generate-operation-token/update, body: {nonce: compat-not-an-attempt}}
+    expect: *invalid-input
+  - id: update-missing-nonce
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/generate-operation-token/update, body: {key: compat-not-a-root-key-share}}
+    expect: *invalid-input
+  - id: operation-token-delete-missing-token
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/operation-token/delete, body: {}}
+    expect: *invalid-input
+  - id: reindex-missing-operation-token
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/reindex, body: {diff: false, force: false, skip_flush: false}}
+    expect: *invalid-input
+  - id: merkle-check-missing-operation-token
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/merkle-check, body: {}}
+    expect: *invalid-input
+  - id: attempt-read-without-auth
+    no_auth: true
+    request: {method: GET, path: /v1/sys/replication/dr/secondary/generate-operation-token/attempt, headers: {X-Vault-Token: ''}}
+    expect: &unauthorized
+      status: 403
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: attempt-start-without-auth
+    no_auth: true
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/generate-operation-token/attempt, body: {}, headers: {X-Vault-Token: ''}}
+    expect: *unauthorized
+  - id: attempt-cancel-without-auth
+    no_auth: true
+    request: {method: DELETE, path: /v1/sys/replication/dr/secondary/generate-operation-token/attempt, headers: {X-Vault-Token: ''}}
+    expect: *unauthorized
+  - id: update-without-auth
+    no_auth: true
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/generate-operation-token/update, body: {}, headers: {X-Vault-Token: ''}}
+    expect: *unauthorized
+  - id: operation-token-delete-without-auth
+    no_auth: true
+    request: {method: POST, path: /v1/sys/replication/dr/secondary/operation-token/delete, body: {}, headers: {X-Vault-Token: ''}}
+    expect: *unauthorized

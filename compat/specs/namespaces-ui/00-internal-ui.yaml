@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: MPL-2.0
+api: internal-ui-namespace-listing
+feature: namespaces-ui
+source: https://developer.hashicorp.com/vault/api-docs/system/internal-ui-namespaces
+source_version: "v2.x (latest)"
+notes: |
+  Additional sources: https://developer.hashicorp.com/vault/api-docs/system/namespaces
+  and https://developer.hashicorp.com/vault/api-docs (both v2.x (latest)).
+  Disposable initialized/unsealed target with root-namespace administrative token.
+  Reserves compat-ui-list and its child nested; these names MUST NOT already exist.
+  Creates fixtures to avoid inventing empty-list behavior absent from the UI docs.
+  GET is authenticated, returns data.keys, includes nested namespace paths, excludes
+  root, and needs no explicit capability on the internal UI route itself. This root
+  token suite does not prove restricted-token visibility or policy-free route access.
+  Internal endpoints explicitly make no backwards-compatibility guarantees.
+  Cleanup depends on fixture creation, NOT the assertion, so failures do not block it.
+cases:
+  - id: create-ui-parent
+    request: {method: POST, path: /v1/sys/namespaces/compat-ui-list, body: {}}
+    expect: {status: [200, 204]}
+  - id: create-ui-nested
+    depends: [create-ui-parent]
+    request:
+      method: POST
+      path: /v1/sys/namespaces/nested
+      headers: {X-Vault-Namespace: compat-ui-list/}
+      body: {}
+    expect: {status: [200, 204]}
+  - id: list-ui-namespaces-recursively
+    depends: [create-ui-parent, create-ui-nested]
+    request: {method: GET, path: /v1/sys/internal/ui/namespaces}
+    expect:
+      status: 200
+      contains: {data.keys: [compat-ui-list/, compat-ui-list/nested/]}
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys]
+            properties:
+              keys:
+                type: array
+                items:
+                  type: string
+                  pattern: '^[^/]+(/[^/]+)*/$'
+  - id: ui-namespaces-requires-auth
+    no_auth: true
+    request: {method: GET, path: /v1/sys/internal/ui/namespaces, headers: {X-Vault-Token: ''}}
+    expect:
+      status: 403
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: delete-ui-nested
+    depends: [create-ui-nested]
+    request: {method: DELETE, path: /v1/sys/namespaces/nested, headers: {X-Vault-Namespace: compat-ui-list/}}
+    expect: {status: [200, 204]}
+  - id: delete-ui-parent
+    depends: [create-ui-parent]
+    request: {method: DELETE, path: /v1/sys/namespaces/compat-ui-list}
+    expect: {status: [200, 204]}
