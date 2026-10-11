@@ -1,0 +1,277 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-tools-random
+feature: entropy-augmentation
+source: https://developer.hashicorp.com/vault/api-docs/system/tools
+source_version: v2.x (latest)
+notes: >-
+  Source sections: Generate random bytes. The documented parameters are
+  bytes (URL or body, default 32), format (hex/base64, default base64),
+  source (platform default, seal = enterprise entropy augmentation, all =
+  mixes bytes from all available sources) and drbg ("auto"/"hmacdrbg" seeds
+  a CSPRNG with a seed from the chosen source for efficient larger volumes).
+  Caps: up to 10MB with the platform source or with the DRBG option; 128KB
+  for seal/all sources using entropy augmentation. Without entropy
+  augmentation (no HSM-backed seal), the fork degrades seal/all sampling to
+  platform entropy; the seal source announces this in a response warning
+  ("no seal/entropy augmentation available, using platform entropy source")
+  — observable but not documented, so the warning is not asserted. A body
+  source value that is not a valid source is replaced by the
+  framework with the endpoint's path-captured source (absent → default
+  "platform") plus a replacement warning; the body-source form is therefore
+  inert for this endpoint and the URL form is authoritative (pre-existing
+  upstream framework behavior, not documented). The DRBG is HMAC-mode
+  Hash_DRBG per NIST SP 800-90A Rev 1 (SHA-256, 256-bit strength), seeded
+  with 64 bytes from the chosen source; output is not assertable, only
+  shape and lengths.
+cases:
+  - id: random-default
+    request:
+      method: POST
+      path: /v1/sys/tools/random
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-url-bytes
+    request:
+      method: POST
+      path: /v1/sys/tools/random/64
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-bytes-body
+    request:
+      method: POST
+      path: /v1/sys/tools/random
+      body: {bytes: 64}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-format-hex
+    request:
+      method: POST
+      path: /v1/sys/tools/random/32
+      body: {format: hex}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string, pattern: '^[0-9a-f]{64}$'}
+  - id: random-drbg-auto
+    request:
+      method: POST
+      path: /v1/sys/tools/random/32
+      body: {drbg: auto}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-drbg-hmacdrbg
+    request:
+      method: POST
+      path: /v1/sys/tools/random/32
+      body: {drbg: hmacdrbg}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-drbg-hex-hexlen
+    request:
+      method: POST
+      path: /v1/sys/tools/random/96
+      body: {drbg: hmacdrbg, format: hex}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string, pattern: '^[0-9a-f]{192}$'}
+  - id: random-drbg-seal
+    request:
+      method: POST
+      path: /v1/sys/tools/random/32
+      body: {drbg: auto, source: seal}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-source-platform-url
+    request:
+      method: POST
+      path: /v1/sys/tools/random/platform/16
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-source-seal-body
+    request:
+      method: POST
+      path: /v1/sys/tools/random
+      body: {source: seal, bytes: 32}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  # The body-source form is inert: the framework replaces the body value
+  # with the path-captured source (default platform) and emits a warning.
+  # Asserted as the observed 200 with platform-shaped output.
+  - id: random-source-all
+    request:
+      method: POST
+      path: /v1/sys/tools/random/all/32
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-source-seal-cap-ok
+    request:
+      method: POST
+      path: /v1/sys/tools/random/seal/131072
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [random_bytes]
+            properties:
+              random_bytes: {type: string}
+  - id: random-source-seal-cap-exceeded
+    request:
+      method: POST
+      path: /v1/sys/tools/random/seal/131073
+    expect:
+      status: [400]
+      errors_contain: ["'bytes' should be less than"]
+  - id: random-platform-cap-exceeded
+    request:
+      method: POST
+      path: /v1/sys/tools/random
+      body: {bytes: 10485761}
+    expect:
+      status: [400]
+      errors_contain: ["'bytes' should be less than"]
+  - id: random-bytes-zero
+    request:
+      method: POST
+      path: /v1/sys/tools/random
+      body: {bytes: 0}
+    expect:
+      status: [400]
+      errors_contain: ["'bytes' cannot be less than 1"]
+  - id: random-bytes-negative
+    request:
+      method: POST
+      path: /v1/sys/tools/random
+      body: {bytes: -5}
+    expect:
+      status: [400]
+      errors_contain: ["'bytes' cannot be less than 1"]
+  - id: random-source-invalid-url
+    request:
+      method: POST
+      path: /v1/sys/tools/random/bogus/32
+    expect:
+      status: [400]
+      errors_contain: ["unsupported entropy source"]
+  - id: random-source-invalid-body
+    request:
+      method: POST
+      path: /v1/sys/tools/random
+      body: {source: bogus, bytes: 32}
+    expect:
+      status: [200]
+  - id: random-drbg-invalid
+    request:
+      method: POST
+      path: /v1/sys/tools/random/32
+      body: {drbg: bogus}
+    expect:
+      status: [400]
+      errors_contain: ["unsupported drbg mode"]
+  - id: random-format-invalid
+    request:
+      method: POST
+      path: /v1/sys/tools/random/32
+      body: {format: bogus}
+    expect:
+      status: [400]
+      errors_contain: ["unsupported encoding format"]

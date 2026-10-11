@@ -70,6 +70,9 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/identity/store.go` | +`handleLoginMFASelfEnrollUpdate` handler + path registration for `identity/mfa/method/totp/self-enroll` (requires `mfa_request_id`+`mfa_method_id`, entity-backed token, enabled method) | Documented self-enrollment endpoint; binds enrollment to the caller's unexpired pending login without consuming it | — |
 | `internal/vault/policy/policy.go` | Removed "missing controlled capabilities" parse error for a control_group factor without `controlled_capabilities` | Vault Enterprise control-group docs: `controlled_capabilities` is optional — when omitted the factor applies to every operation on the path; `validateControlGroup` already treats nil as always-applicable | — |
 | `internal/vault/request_handling.go` | In the approved control-group deferred-unwrap path: `deferredReq.WrapInfo = nil` before re-execution; explicit `tokenStore.UseToken` consumption after the deferred request runs | Re-executing the stored request as-is re-wrapped the response (wrap-of-the-wrap) instead of returning the original data; the early return also bypassed the normal use-count decrement, leaving the wrapping token reusable after a successful unwrap (response-wrapping tokens are single-use) | — |
+| `internal/helper/random/drbg.go` (new) | HMAC-mode Hash_DRBG per NIST SP 800-90A Rev 1 (SHA-256, 256-bit strength): instantiate/update/generate with post-generate no-data update | The documented drbg option of the random API ("seeds a cryptographically secure random generator with a seed from the chosen source") had no implementation | — |
+| `internal/helper/random/random_api.go` | +`drbg` parameter (auto/hmacdrbg → seed from the chosen source, generate via HMAC-DRBG); caps split per docs: 10MB for platform/DRBG, 128KB for seal/all (was a global 128KB) | Documented Generate-random-bytes contract (api-docs/system/tools, v2.x (latest)); seal/all keep the pre-existing degradation to platform sampling with the seal warning | — |
+| `internal/vault/logical_system_paths.go` | +`drbg` field on the `tools/random` path schema | Same as above (the field must exist in the schema for body-form delivery) | — |
 | `internal/vault/identity/mfa.go` | +`ValidateMFASelfEnrollment` (pop+re-push pending under queue lock, namespace/entity binding) + `enable_self_enrollment` on config create/read | Self-enrollment semantics: enrollment must not consume the pending login; non-entity tokens rejected | — |
 | `internal/vault/login_mfa.go` | +`enable_self_enrollment` persisted on login MFA TOTP method config (create/update/read) | Operator-visible knob enabling self-enrollment per method | — |
 | `internal/vault/logical_system_raft.go` | `raftStoragePaths()` prepends `b.snapshotLoadPaths()` (return append pattern) | Registers `/sys/storage/raft/snapshot-load` (POST/LIST/GET/DELETE) + `/sys/storage/raft/snapshot-auto/snapshot-load/:name` when raft storage is in use | — |
@@ -318,6 +321,31 @@ Core seams (ledger rows above):
   plain 500 — status not documented); a non-group-member authorize is a
   200 no-op (approved stays false).
 
+### Entropy augmentation: random API drbg + documented caps (compat-control-group branch)
+
+Additive (`compat/`): `compat/specs/entropy/00-tools-random.yaml` — 20 cases
+covering the documented Generate-random-bytes surface: URL and body byte
+counts, hex/base64 formats, `drbg=auto`/`hmacdrbg` (200 with correct
+shape/length), platform URL form, seal/all degradation to platform sampling,
+the 128KB seal cap (131072 ok / 131073 rejected) and 10MB platform cap
+(10485761 rejected), bytes<1, invalid source (URL form 400 with the
+documented-style error; body form inert due to the framework's
+path-capture override — documented in notes), invalid drbg and format.
+
+Core seams (ledger rows above):
+
+- `internal/helper/random/drbg.go`: HMAC-mode Hash_DRBG (NIST SP 800-90A
+  Rev 1, SHA-256) — the generator behind the documented drbg option.
+- `internal/helper/random/random_api.go`: drbg parameter wiring + documented
+  caps split (10MB platform/DRBG vs 128KB seal/all); the seal warning and
+  the "all has no warning" semantics are preserved exactly (the sibling's
+  transit random specs assert them).
+- `internal/vault/logical_system_paths.go`: drbg field on the sys path only
+  (the transit docs do not document drbg; transit gets it via the shared
+  helper but no schema field → inert).
+- Entropy augmentation's config-file stanza (entropy "seal") is a server
+  configuration surface, not an API surface — nothing to port beyond the
+  random API behavior.
 ### Raft snapshot-load (compat-harness branch)
 
 New files (additive, port free): `internal/vault/logical_system_raft_snapshot_load.go`

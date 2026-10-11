@@ -2064,6 +2064,12 @@ func (b *SystemBackend) toolsPaths() []*framework.Path {
 					Default:     "platform",
 					Description: `Which system to source random data from, ether "platform", "seal", or "all".`,
 				},
+
+				"drbg": {
+					Type:        framework.TypeString,
+					Default:     "",
+					Description: `When set to "auto" or "hmacdrbg", seeds a cryptographically secure random generator with a seed from the chosen source in order to efficiently generate a larger volume of random bytes. "auto" is equivalent to "hmacdrbg" but in the future may select the most appropriate of multiple options.`,
+				},
 			},
 
 			Operations: map[logical.Operation]framework.OperationHandler{
