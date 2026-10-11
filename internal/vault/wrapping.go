@@ -111,6 +111,10 @@ func (c *Core) wrapInCubbyhole(ctx context.Context, req *logical.Request, resp *
 
 DONELISTHANDLING:
 	var err error
+	resp.WrapInfo.TTL, err = c.controlGroupWrappingTTL(ctx, resp.WrapInfo.TTL, extraData)
+	if err != nil {
+		return nil, err
+	}
 	sealWrap := resp.WrapInfo.SealWrap
 
 	var ns *namespace.Namespace

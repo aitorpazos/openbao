@@ -135,6 +135,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	}
 
 	b.Paths = append(b.Paths, b.configPaths()...)
+	b.Paths = append(b.Paths, b.controlGroupConfigPaths()...)
 	b.Paths = append(b.Paths, b.oauthResourceServerPaths()...)
 	b.Paths = append(b.Paths, b.activationFlagPaths()...)
 	b.Paths = append(b.Paths, b.rekeyPaths()...)
