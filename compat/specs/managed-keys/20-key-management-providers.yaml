@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: MPL-2.0
+api: key-management-kms-providers
+feature: managed-keys
+source: https://developer.hashicorp.com/vault/api-docs/secret/key-management
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Create/Update, Read, List KMS provider.
+  Mount API: https://developer.hashicorp.com/vault/api-docs/system/mounts.
+  Plugin/license: https://developer.hashicorp.com/vault/docs/secrets/key-management.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources v2.x (latest).
+  Requires Enterprise ADP and an administrative root-namespace token on an
+  initialized/unsealed disposable target. Reserve absent mount compat-km-providers/.
+  No concurrent use. Cleanup unconditionally disables this mount only.
+  Required-field negatives run before any configuration exists. Credentials are
+  optional (environment fallback); missing credentials is NOT a validation test.
+  Positive provider CRUD and distribution require external fixtures; see notes.md.
+cases:
+  - id: mount-enable
+    request: {method: POST, path: /v1/sys/mounts/compat-km-providers, body: {type: keymgmt}}
+    expect: {status: [200, 204]}
+  - id: list-empty-providers
+    depends: [mount-enable]
+    request: {method: LIST, path: /v1/compat-km-providers/kms}
+    expect: {status: 404, exact: {errors: []}}
+  - id: read-unknown-provider
+    depends: [mount-enable]
+    request: {method: GET, path: /v1/compat-km-providers/kms/compat-km-absent}
+    expect: {status: 404}
+  - id: missing-provider
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-km-providers/kms/compat-km-missing-provider
+      body: {key_collection: compat-km-collection}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: unknown-provider
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-km-providers/kms/compat-km-invalid-provider
+      body: {provider: compat-km-invalid, key_collection: compat-km-collection}
+    expect: *invalid
+  - id: aws-missing-collection
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-km-providers/kms/compat-km-missing-aws, body: {provider: awskms}}
+    expect: *invalid
+  - id: azure-missing-collection
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-km-providers/kms/compat-km-missing-azure, body: {provider: azurekeyvault}}
+    expect: *invalid
+  - id: gcp-missing-collection
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-km-providers/kms/compat-km-missing-gcp, body: {provider: gcpckms}}
+    expect: *invalid
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-km-providers}
+    expect: {status: [200, 204]}

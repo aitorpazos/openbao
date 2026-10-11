@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: MPL-2.0
+api: key-management-local-keys
+feature: managed-keys
+source: https://developer.hashicorp.com/vault/api-docs/secret/key-management
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Create, Read, List, Update, Rotate, Delete key; List KMS providers of key.
+  Mount API: https://developer.hashicorp.com/vault/api-docs/system/mounts.
+  Plugin/license: https://developer.hashicorp.com/vault/docs/secrets/key-management.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources v2.x (latest).
+  Requires Enterprise ADP, an administrative token, initialized/unsealed disposable
+  target, and absent mount compat-km-keys/. No concurrent runs or users.
+  Local key generation does not require cloud distribution or credentials.
+  Cleanup unconditionally disables only this reserved mount, destroying its keys.
+  No unknown-delete idempotency assertion: the endpoint does not specify it.
+cases:
+  - id: mount-enable
+    request: {method: POST, path: /v1/sys/mounts/compat-km-keys, body: {type: keymgmt}}
+    expect: {status: [200, 204]}
+  - id: read-unknown
+    depends: [mount-enable]
+    request: {method: GET, path: /v1/compat-km-keys/key/compat-km-absent}
+    expect: {status: 404}
+  - id: list-empty
+    depends: [mount-enable]
+    request: {method: LIST, path: /v1/compat-km-keys/key}
+    expect: {status: 404, exact: {errors: []}}
+  - id: invalid-key-type
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-km-keys/key/compat-km-invalid, body: {type: compat-km-invalid}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: create-default-key
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/compat-km-keys/key/compat-km-local, body: {}}
+    expect: {status: [200, 204]}
+  - id: read-default-key
+    depends: [mount-enable, create-default-key]
+    request: {method: GET, path: /v1/compat-km-keys/key/compat-km-local}
+    expect:
+      status: 200
+      exact: {data.name: compat-km-local, data.type: rsa-2048, data.deletion_allowed: false, data.latest_version: 1}
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys]
+            properties:
+              keys:
+                type: object
+                required: ['1']
+                properties:
+                  '1':
+                    type: object
+                    required: [creation_time, public_key]
+                    properties:
+                      creation_time: {type: string}
+                      public_key: {type: string}
+  - id: list-created-key
+    depends: [mount-enable, create-default-key]
+    request: {method: LIST, path: /v1/compat-km-keys/key}
+    expect: {status: 200, contains: {data.keys: [compat-km-local]}}
+  - id: list-no-distributions
+    depends: [mount-enable, create-default-key]
+    request: {method: LIST, path: /v1/compat-km-keys/key/compat-km-local/kms}
+    expect: {status: 404, exact: {errors: []}}
+  - id: delete-protected-key
+    depends: [mount-enable, create-default-key]
+    request: {method: DELETE, path: /v1/compat-km-keys/key/compat-km-local}
+    expect: *invalid
+  - id: rotate-key
+    depends: [mount-enable, create-default-key]
+    request: {method: POST, path: /v1/compat-km-keys/key/compat-km-local/rotate}
+    expect: {status: [200, 204]}
+  - id: read-rotated-key
+    depends: [mount-enable, create-default-key, rotate-key]
+    request: {method: GET, path: /v1/compat-km-keys/key/compat-km-local}
+    expect: {status: 200, exact: {data.latest_version: 2, data.type: rsa-2048}}
+  - id: update-key
+    depends: [mount-enable, create-default-key, rotate-key]
+    request:
+      method: POST
+      path: /v1/compat-km-keys/key/compat-km-local
+      body: {min_enabled_version: 2, deletion_allowed: true}
+    expect: {status: [200, 204]}
+  - id: read-updated-key
+    depends: [mount-enable, update-key]
+    request: {method: GET, path: /v1/compat-km-keys/key/compat-km-local}
+    expect: {status: 200, exact: {data.min_enabled_version: 2, data.deletion_allowed: true}}
+  - id: delete-key
+    depends: [mount-enable, update-key]
+    request: {method: DELETE, path: /v1/compat-km-keys/key/compat-km-local}
+    expect: {status: [200, 204]}
+  - id: read-deleted-key
+    depends: [mount-enable, delete-key]
+    request: {method: GET, path: /v1/compat-km-keys/key/compat-km-local}
+    expect: {status: 404}
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-km-keys}
+    expect: {status: [200, 204]}

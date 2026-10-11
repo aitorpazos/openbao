@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-managed-keys
+feature: managed-keys
+source: https://developer.hashicorp.com/vault/api-docs/system/managed-keys
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: List, Create/Update, Read managed key; generic and backend parameters.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response, v2.x (latest). Empty LIST returns 404 per the API overview.
+  Root namespace and administrative token on an appropriately licensed, unsealed
+  disposable target. PKCS11 additionally requires Enterprise plus HSMs.
+  Reserve all compat-mk-* names; they must be absent and unused concurrently.
+  Only invalid configurations are submitted, with generation disabled by default.
+  No credentials, HSM libraries, or external cloud keys are required for validation.
+  Lists may contain pre-existing unrelated entries; examples omit the response envelope,
+  so assert status/object only. Unknown type 400 follows the documented enum and
+  general invalid-data contract, not undocumented exact error text.
+  Cloud/HSM positive CRUD, signing, and delete protection are fixture-gated in notes.md.
+cases:
+  - id: unknown-type
+    request: {method: POST, path: /v1/sys/managed-keys/compat-mk-invalid/compat-mk-invalid, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: pkcs11-missing-required
+    request: {method: POST, path: /v1/sys/managed-keys/pkcs11/compat-mk-missing-pkcs11, body: {}}
+    expect: *invalid
+  - id: aws-missing-required
+    request: {method: POST, path: /v1/sys/managed-keys/awskms/compat-mk-missing-aws, body: {}}
+    expect: *invalid
+  - id: azure-missing-required
+    request: {method: POST, path: /v1/sys/managed-keys/azurekeyvault/compat-mk-missing-azure, body: {}}
+    expect: *invalid
+  - id: gcp-missing-required
+    request: {method: POST, path: /v1/sys/managed-keys/gcpckms/compat-mk-missing-gcp, body: {}}
+    expect: *invalid
+  - id: read-unknown-pkcs11
+    request: {method: GET, path: /v1/sys/managed-keys/pkcs11/compat-mk-absent}
+    expect: {status: 404}
+  - id: read-unknown-aws
+    request: {method: GET, path: /v1/sys/managed-keys/awskms/compat-mk-absent}
+    expect: {status: 404}
+  - id: read-unknown-azure
+    request: {method: GET, path: /v1/sys/managed-keys/azurekeyvault/compat-mk-absent}
+    expect: {status: 404}
+  - id: read-unknown-gcp
+    request: {method: GET, path: /v1/sys/managed-keys/gcpckms/compat-mk-absent}
+    expect: {status: 404}
+  - id: list-pkcs11
+    request: {method: LIST, path: /v1/sys/managed-keys/pkcs11}
+    expect: {status: [200, 404], body_schema: {type: object}}
+  - id: list-aws
+    request: {method: LIST, path: /v1/sys/managed-keys/awskms}
+    expect: {status: [200, 404], body_schema: {type: object}}
+  - id: list-azure
+    request: {method: LIST, path: /v1/sys/managed-keys/azurekeyvault}
+    expect: {status: [200, 404], body_schema: {type: object}}
+  - id: list-gcp
+    request: {method: LIST, path: /v1/sys/managed-keys/gcpckms}
+    expect: {status: [200, 404], body_schema: {type: object}}

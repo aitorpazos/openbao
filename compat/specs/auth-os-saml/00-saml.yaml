@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: MPL-2.0
+api: saml-auth-configuration-and-roles
+feature: auth-os-saml
+source: https://developer.hashicorp.com/vault/api-docs/auth/saml
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: Create or update configuration, Read configuration, role CRUD,
+  Obtain SSO service URL, Obtain vault token. Mount lifecycle:
+  https://developer.hashicorp.com/vault/api-docs/system/auth (v2.x (latest)).
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response (v2.x (latest)). See notes.md for source discrepancies.
+  Disposable licensed Enterprise target, administrative token, root namespace.
+  Reserve auth/compat-saml-api/; must be absent initially. No concurrent runs.
+  Cleanup unconditionally disables only this mount. Static IdP certificate below
+  is a locally generated public test fixture, not a real IdP or response oracle;
+  its private key was discarded. Static configuration avoids metadata fetching.
+  Browser SSO/callback/token success requires an external IdP fixture and dynamic
+  flow state; no successful authentication is claimed. No DELETE config is documented.
+  Roles use documented bound_subjects/attributes, NOT allowed_redirect_uris.
+  List response example is a bare array; assert status only, not guessed envelope.
+cases:
+  - id: mount-enable
+    request: {method: POST, path: /v1/sys/auth/compat-saml-api, body: {type: saml}}
+    expect: {status: [200, 204]}
+  - id: config-required-fields
+    depends: [mount-enable]
+    request: {method: POST, path: /v1/auth/compat-saml-api/config, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: config-create-static
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-saml-api/config
+      body: &config
+        entity_id: https://compat-saml-sp.invalid
+        acs_urls: [https://compat-saml-sp.invalid/v1/auth/compat-saml-api/callback]
+        idp_sso_url: https://compat-saml-idp.invalid/sso
+        idp_entity_id: https://compat-saml-idp.invalid
+        idp_cert: |
+          -----BEGIN CERTIFICATE-----
+          MIIDBjCCAe6gAwIBAgIUUPk5kH4EmjKAmhLFx6PGKZXr5mwwDQYJKoZIhvcNAQEL
+          BQAwIjEgMB4GA1UEAwwXY29tcGF0LXNhbWwtaWRwLmludmFsaWQwIBcNMjYxMDEx
+          MjAyODAwWhgPMjEyNjA5MTcyMDI4MDBaMCIxIDAeBgNVBAMMF2NvbXBhdC1zYW1s
+          LWlkcC5pbnZhbGlkMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsjYZ
+          WsbnuMvRnG8ftFtWNG4nit+pQTGl3/LDh+JdkyDR7AacqLOwd3slApaTPXKnML+S
+          8igSdgVlnsUC7wYGbKK9FlOn2IvNk/qN1Ixc9y22eChh69StGOVQRwSszs4ZS8d4
+          hjJCmqdes9CGFxs/kzGC+RuK60WhkIuiDwrRbwafEjGZmBal/LaSfXI/z1SQdLbA
+          Fq1Ggh5/hhi04iHlVk8BVkcurbLPOaqs5xAmqvZc0ptYeBMfglJTaQzDlTG7FR1m
+          nbPVNw1brwdHp9syzmJsAB+woGk6kQu7BqFJsFwl3/DfThXW/cet/8wTmtERdte9
+          Uz1DE30eoCSIZiMzHQIDAQABozIwMDAdBgNVHQ4EFgQUD92/C8P74beEQBlvDMXQ
+          oDSamn0wDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAfcv1Hz5E
+          6vfi03i77X8d2jFwDacxm36d7ADZNkQYbgoUJ4Ek+AWFEFMQChLezH0eB0fsWmTd
+          UHK5TV8//n1n26EWnB38SaBtJlL4VWcoXiqI+oYyC7XyvyDxebci3BDOU9y3KFKf
+          j21LyhbW8psn5UZsFyUSlzR0tu6pMKxog1yzQS/pDkaW35L096In65qhOgVymfa5
+          HphReiQvtFx6/ROYk7bjkjdJLFdR588BboU/bdEq6uw6Bl+xH7HAbo0EEPHsMw2o
+          tggt54MQ4Cz3AeV4/nONJw1LFhj4xQ8fyHGWG0HAZpyV/iSvzmmaJEG9Iy5KllBh
+          9ubA6Bf2Nx5bKg==
+          -----END CERTIFICATE-----
+        validate_response_signature: true
+        validate_assertion_signature: true
+    expect: {status: [200, 204]}
+  - id: config-read
+    depends: [config-create-static]
+    request: {method: GET, path: /v1/auth/compat-saml-api/config}
+    expect:
+      status: 200
+      exact:
+        data.entity_id: https://compat-saml-sp.invalid
+        data.acs_urls: [https://compat-saml-sp.invalid/v1/auth/compat-saml-api/callback]
+        data.validate_response_signature: true
+        data.validate_assertion_signature: true
+  - id: config-update
+    depends: [config-create-static]
+    request:
+      method: PUT
+      path: /v1/auth/compat-saml-api/config
+      body:
+        <<: *config
+        default_role: compat-saml-role
+    expect: {status: [200, 204]}
+  - id: config-read-updated
+    depends: [config-update]
+    request: {method: GET, path: /v1/auth/compat-saml-api/config}
+    expect: {status: 200, exact: {data.default_role: compat-saml-role}}
+  - id: role-invalid-subject-type
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-saml-api/role/compat-saml-invalid
+      body: {bound_subjects: '*@example.invalid', bound_subjects_type: invalid}
+    expect: *invalid
+  - id: role-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-saml-api/role/compat-saml-role
+      body: &role
+        bound_subjects: '*@example.invalid'
+        bound_subjects_type: glob
+        bound_attributes: {group: compat-saml-group}
+        bound_attributes_type: string
+        groups_attribute: group
+        token_policies: [compat-saml-policy]
+        token_ttl: 300
+        token_type: batch
+    expect: {status: [200, 204]}
+  - id: role-read
+    depends: [role-create]
+    request: {method: GET, path: /v1/auth/compat-saml-api/role/compat-saml-role}
+    expect:
+      status: 200
+      exact:
+        data.bound_subjects: ['*@example.invalid']
+        data.bound_subjects_type: glob
+        data.bound_attributes.group: [compat-saml-group]
+        data.bound_attributes_type: string
+        data.groups_attribute: group
+        data.token_policies: [compat-saml-policy]
+        data.token_ttl: 300
+        data.token_type: batch
+  - id: role-list
+    depends: [role-create]
+    request: {method: GET, path: '/v1/auth/compat-saml-api/role?list=true'}
+    expect: {status: 200}
+  - id: role-update
+    depends: [role-create]
+    request:
+      method: PUT
+      path: /v1/auth/compat-saml-api/role/compat-saml-role
+      body: {<<: *role, token_ttl: 600, token_policies: [compat-saml-updated]}
+    expect: {status: [200, 204]}
+  - id: role-read-updated
+    depends: [role-update]
+    request: {method: GET, path: /v1/auth/compat-saml-api/role/compat-saml-role}
+    expect: {status: 200, exact: {data.token_ttl: 600, data.token_policies: [compat-saml-updated]}}
+  - id: sso-missing-challenge
+    depends: [config-update, role-create]
+    request:
+      method: POST
+      path: /v1/auth/compat-saml-api/sso_service_url
+      body: {role: compat-saml-role, client_type: cli, acs_url: 'https://compat-saml-sp.invalid/v1/auth/compat-saml-api/callback'}
+    expect: *invalid
+  - id: token-missing-required-fields
+    depends: [config-update]
+    request: {method: POST, path: /v1/auth/compat-saml-api/token, body: {}}
+    expect: *invalid
+  - id: role-delete
+    depends: [role-create]
+    request: {method: DELETE, path: /v1/auth/compat-saml-api/role/compat-saml-role}
+    expect: {status: [200, 204]}
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-saml-api}
+    expect: {status: [200, 204]}

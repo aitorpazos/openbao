@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: MPL-2.0
+api: scep-auth-roles-and-pki-configuration
+feature: auth-os-saml
+source: https://developer.hashicorp.com/vault/api-docs/auth/scep
+source_version: "v2.x (latest)"
+notes: |
+  Role CRUD source: primary URL. SCEP has no auth/config API in that document.
+  PKI configuration source: https://developer.hashicorp.com/vault/api-docs/secret/pki/issuance#scep-certificate-issuance.
+  Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/auth
+  and https://developer.hashicorp.com/vault/api-docs/system/mounts.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources v2.x (latest).
+  Disposable licensed target with admin token; reserve auth/compat-scep-api/ and
+  compat-scep-pki/ (both MUST be absent initially). No concurrent runs. Final
+  cleanup is unconditional and disables only these mounts.
+  PKI SCEP stays disabled: no issuer, delegated accessor or real client required.
+  Static challenge and policy names are disposable fixtures, not actual secrets.
+  Login is delegated from PKI, not a direct auth login. Protocol query requests
+  are representable by the harness but their response contracts are not specified
+  in these docs. See notes.md; do not invent /auth/scep/scep/pkiclient endpoints.
+cases:
+  - id: auth-mount-enable
+    request: {method: POST, path: /v1/sys/auth/compat-scep-api, body: {type: scep}}
+    expect: {status: [200, 204]}
+  - id: role-missing-auth-type
+    depends: [auth-mount-enable]
+    request: {method: POST, path: /v1/auth/compat-scep-api/role/compat-scep-invalid, body: {challenge: compat-scep-challenge}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: role-invalid-auth-type
+    depends: [auth-mount-enable]
+    request: {method: POST, path: /v1/auth/compat-scep-api/role/compat-scep-invalid, body: {auth_type: invalid}}
+    expect: *invalid
+  - id: role-create-static
+    depends: [auth-mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-scep-api/role/compat-scep-static
+      body: &static
+        auth_type: static-challenge
+        challenge: compat-scep-challenge
+        display_name: compat-scep-display
+        token_policies: [compat-scep-policy]
+        token_type: batch
+        token_ttl: 300
+    expect:
+      status: 200
+      exact: {data.auth_type: static-challenge, data.name: compat-scep-static, data.token_type: batch}
+  - id: role-read-static
+    depends: [role-create-static]
+    request: {method: GET, path: /v1/auth/compat-scep-api/role/compat-scep-static}
+    expect:
+      status: 200
+      exact:
+        data.auth_type: static-challenge
+        data.display_name: compat-scep-display
+        data.name: compat-scep-static
+        data.token_policies: [compat-scep-policy]
+        data.token_type: batch
+        data.token_ttl: 300
+  - id: role-update-static
+    depends: [role-create-static]
+    request:
+      method: POST
+      path: /v1/auth/compat-scep-api/role/compat-scep-static
+      body: {<<: *static, display_name: compat-scep-updated, challenge: compat-scep-new-challenge, token_ttl: 600}
+    expect: {status: 200, exact: {data.display_name: compat-scep-updated, data.token_ttl: 600}}
+  - id: role-read-updated
+    depends: [role-update-static]
+    request: {method: GET, path: /v1/auth/compat-scep-api/role/compat-scep-static}
+    expect: {status: 200, exact: {data.display_name: compat-scep-updated, data.token_ttl: 600}}
+  - id: role-create-intune
+    depends: [auth-mount-enable]
+    request:
+      method: POST
+      path: /v1/auth/compat-scep-api/role/compat-scep-intune
+      body: {auth_type: intune, token_type: batch, token_policies: [compat-scep-policy]}
+    expect: {status: 200, exact: {data.auth_type: intune, data.name: compat-scep-intune}}
+  - id: role-list
+    depends: [role-create-static, role-create-intune]
+    request: {method: LIST, path: /v1/auth/compat-scep-api/role}
+    expect:
+      status: 200
+      contains: {data.keys: [compat-scep-static, compat-scep-intune]}
+  - id: role-delete-static
+    depends: [role-create-static]
+    request: {method: DELETE, path: /v1/auth/compat-scep-api/role/compat-scep-static}
+    expect: {status: [200, 204]}
+  - id: role-delete-intune
+    depends: [role-create-intune]
+    request: {method: DELETE, path: /v1/auth/compat-scep-api/role/compat-scep-intune}
+    expect: {status: [200, 204]}
+  - id: roles-empty
+    depends: [role-delete-static, role-delete-intune]
+    request: {method: LIST, path: /v1/auth/compat-scep-api/role}
+    expect: {status: 404}
+  - id: pki-mount-enable
+    request: {method: POST, path: /v1/sys/mounts/compat-scep-pki, body: {type: pki}}
+    expect: {status: [200, 204]}
+  - id: pki-invalid-digest
+    depends: [pki-mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-scep-pki/config/scep
+      body: {enabled: false, allowed_digest_algorithms: [invalid]}
+    expect: *invalid
+  - id: pki-configure-disabled
+    depends: [pki-mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-scep-pki/config/scep
+      body: &pkiconfig
+        enabled: false
+        default_path_policy: sign-verbatim
+        allowed_digest_algorithms: [sha-256]
+        allowed_encryption_algorithms: [aes256-cbc]
+        restrict_ca_chain_to_issuer: true
+    expect: {status: 200, exact: {data.enabled: false, data.restrict_ca_chain_to_issuer: true}}
+  - id: pki-read-config
+    depends: [pki-configure-disabled]
+    request: {method: GET, path: /v1/compat-scep-pki/config/scep}
+    expect:
+      status: 200
+      exact:
+        data.enabled: false
+        data.default_path_policy: sign-verbatim
+        data.allowed_digest_algorithms: [sha-256]
+        data.allowed_encryption_algorithms: [aes256-cbc]
+        data.restrict_ca_chain_to_issuer: true
+  - id: pki-update-config
+    depends: [pki-configure-disabled]
+    request:
+      method: POST
+      path: /v1/compat-scep-pki/config/scep
+      body: {<<: *pkiconfig, restrict_ca_chain_to_issuer: false}
+    expect: {status: 200, exact: {data.restrict_ca_chain_to_issuer: false}}
+  - id: pki-read-updated
+    depends: [pki-update-config]
+    request: {method: GET, path: /v1/compat-scep-pki/config/scep}
+    expect: {status: 200, exact: {data.enabled: false, data.restrict_ca_chain_to_issuer: false}}
+  - id: pki-mount-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-scep-pki}
+    expect: {status: [200, 204]}
+  - id: auth-mount-cleanup
+    request: {method: DELETE, path: /v1/sys/auth/compat-scep-api}
+    expect: {status: [200, 204]}

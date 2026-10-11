@@ -1,0 +1,194 @@
+# SPDX-License-Identifier: MPL-2.0
+api: os-local-account-storage
+feature: auth-os-saml
+source: https://developer.hashicorp.com/vault/api-docs/secret/os
+source_version: "v2.x (latest)"
+notes: |
+  Source sections: top-level configuration, host/account CRUD, Read Account
+  Credential, Read Account Credential Versions, Reset/Restore Account Credential.
+  Plugin registration/type and connection deferral:
+  https://developer.hashicorp.com/vault/docs/secrets/os (v2.x (latest)).
+  Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/mounts.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources v2.x (latest).
+  Requires licensed Enterprise with vault-plugin-secrets-os already registered;
+  a stock dev server without that plugin cannot execute the suite successfully.
+  Disposable target/admin token; reserve compat-os-api/ (absent initially).
+  No concurrent users. Cleanup unconditionally disables only this mount.
+  Accounts use verify_connection=false, rotation_period=0 and
+  disable_automated_rotation=true. No rotate endpoint is invoked. Target-side
+  127.0.0.1:1 is an unavailable fixture, not a remote machine to administer.
+  TOFU remains false and the public host key is copied from the API example.
+  Public fixture passwords are stored only in the disposable plugin mount.
+  Reset/restore alter stored credentials only. Do not assert timestamps, TTL or
+  initial version numbering. No OS role API or DELETE config is documented.
+  Reset uses the table's plural accounts path, not the inconsistent curl example.
+cases:
+  - id: mount-enable
+    request:
+      method: POST
+      path: /v1/sys/mounts/compat-os-api
+      body: {type: vault-plugin-secrets-os}
+    expect: {status: [200, 204]}
+  - id: config-create
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-os-api/config
+      body: {max_versions: 10, ssh_host_key_trust_on_first_use: false}
+    expect: {status: [200, 204]}
+  - id: config-read
+    depends: [config-create]
+    request: {method: GET, path: /v1/compat-os-api/config}
+    expect: {status: 200, exact: {data.max_versions: 10, data.ssh_host_key_trust_on_first_use: false}}
+  - id: config-update
+    depends: [config-create]
+    request:
+      method: POST
+      path: /v1/compat-os-api/config
+      body: {max_versions: 5, ssh_host_key_trust_on_first_use: false}
+    expect: {status: [200, 204]}
+  - id: config-read-updated
+    depends: [config-update]
+    request: {method: GET, path: /v1/compat-os-api/config}
+    expect: {status: 200, exact: {data.max_versions: 5, data.ssh_host_key_trust_on_first_use: false}}
+  - id: host-missing-address
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-os-api/hosts/compat-os-invalid
+      body: {rotation_period: 0, disable_automated_rotation: true}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: host-create
+    depends: [config-create]
+    request:
+      method: POST
+      path: /v1/compat-os-api/hosts/compat-os-host
+      body: &host
+        address: 127.0.0.1
+        port: 1
+        ssh_host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+        rotation_period: 0
+        disable_automated_rotation: true
+        custom_metadata: {fixture: compat-os-host, removed: old}
+    expect: {status: [200, 204]}
+  - id: host-read
+    depends: [host-create]
+    request: {method: GET, path: /v1/compat-os-api/hosts/compat-os-host}
+    expect:
+      status: 200
+      exact: {data.address: 127.0.0.1, data.port: 1, data.custom_metadata: {fixture: compat-os-host, removed: old}}
+  - id: host-update-metadata
+    depends: [host-create]
+    request:
+      method: POST
+      path: /v1/compat-os-api/hosts/compat-os-host
+      body: {<<: *host, custom_metadata: {fixture: compat-os-updated}}
+    expect: {status: [200, 204]}
+  - id: host-read-updated
+    depends: [host-update-metadata]
+    request: {method: GET, path: /v1/compat-os-api/hosts/compat-os-host}
+    expect: {status: 200, exact: {data.custom_metadata: {fixture: compat-os-updated}}}
+  - id: host-list
+    depends: [host-create]
+    request: {method: LIST, path: /v1/compat-os-api/hosts}
+    expect: {status: 200, contains: {data.keys: [compat-os-host]}}
+  - id: account-missing-password
+    depends: [host-create]
+    request:
+      method: POST
+      path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-invalid
+      body: {username: compat-os-user, verify_connection: false, rotation_period: 0, disable_automated_rotation: true}
+    expect: *invalid
+  - id: account-create-offline
+    depends: [host-create]
+    request:
+      method: POST
+      path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account
+      body: &account
+        username: compat-os-user
+        password: compat-os-public-fixture-1
+        verify_connection: false
+        rotation_period: 0
+        disable_automated_rotation: true
+        custom_metadata: {fixture: compat-os-account, removed: old}
+    expect: {status: [200, 204]}
+  - id: account-read
+    depends: [account-create-offline]
+    request: {method: GET, path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account}
+    expect:
+      status: 200
+      exact: {data.username: compat-os-user, data.custom_metadata: {fixture: compat-os-account, removed: old}}
+  - id: account-update-metadata
+    depends: [account-create-offline]
+    request:
+      method: POST
+      path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account
+      body: {<<: *account, custom_metadata: {fixture: compat-os-updated}}
+    expect: {status: [200, 204]}
+  - id: account-read-updated
+    depends: [account-update-metadata]
+    request: {method: GET, path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account}
+    expect: {status: 200, exact: {data.custom_metadata: {fixture: compat-os-updated}}}
+  - id: account-list
+    depends: [account-create-offline]
+    request: {method: LIST, path: /v1/compat-os-api/hosts/compat-os-host/accounts/}
+    expect: {status: 200, contains: {data.keys: [compat-os-account]}}
+  - id: creds-read
+    depends: [account-create-offline]
+    request: {method: GET, path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account/creds}
+    expect:
+      status: 200
+      exact: {data.username: compat-os-user, data.password: compat-os-public-fixture-1}
+  - id: versions-read
+    depends: [account-create-offline]
+    request: {method: GET, path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account/versions}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [current_version, versions]
+            properties: {current_version: {type: integer}, versions: {type: object}}
+  - id: reset-missing-password
+    depends: [account-create-offline]
+    request: {method: POST, path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account/reset, body: {}}
+    expect: *invalid
+  - id: reset-stored-password
+    depends: [account-create-offline]
+    request:
+      method: POST
+      path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account/reset
+      body: {password: compat-os-public-fixture-2}
+    expect: {status: [200, 204]}
+  - id: creds-read-reset
+    depends: [reset-stored-password]
+    request: {method: GET, path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account/creds}
+    expect: {status: 200, exact: {data.password: compat-os-public-fixture-2, data.username: compat-os-user}}
+  - id: account-delete
+    depends: [account-create-offline]
+    request: {method: DELETE, path: /v1/compat-os-api/hosts/compat-os-host/accounts/compat-os-account}
+    expect: {status: [200, 204]}
+  - id: accounts-empty
+    depends: [account-delete]
+    request: {method: LIST, path: /v1/compat-os-api/hosts/compat-os-host/accounts/}
+    expect: {status: 404}
+  - id: host-delete
+    depends: [host-create, account-delete]
+    request: {method: DELETE, path: /v1/compat-os-api/hosts/compat-os-host}
+    expect: {status: [200, 204]}
+  - id: hosts-empty
+    depends: [host-delete]
+    request: {method: LIST, path: /v1/compat-os-api/hosts}
+    expect: {status: 404}
+  - id: mount-cleanup
+    request: {method: DELETE, path: /v1/sys/mounts/compat-os-api}
+    expect: {status: [200, 204]}
