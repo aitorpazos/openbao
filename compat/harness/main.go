@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -198,6 +199,10 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 	return "PASS", status, fmt.Sprintf("HTTP %d; all assertions matched", status), captured
 }
 
+// nameRegexp matches bare capture identifiers: $token, $entity_id. Digits
+// alone ($1) and mixed templates ($1-$2-$3) are literal values.
+var nameRegexp = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+
 // substituteCaptured replaces string values starting with "$" in a decoded
 // request body with the named capture slot. Unknown names are an error so
 // stale references fail loudly instead of sending literal "$name".
@@ -222,8 +227,11 @@ func substituteCaptured(v any, capturedData map[string]string) (any, error) {
 		}
 		return t, nil
 	case string:
-		if strings.HasPrefix(t, "$") {
-			name := t[1:]
+		// Only treat an ENTIRE string as a capture reference when it is a
+		// bare alphabetic-identifier placeholder ($token). Values like
+		// "$1-$2-$3" or "$1" are literal Transform encode-format templates,
+		// not captures.
+		if name, ok := strings.CutPrefix(t, "$"); ok && nameRegexp.MatchString(name) {
 			if val, ok := capturedData[name]; ok {
 				return val, nil
 			}
@@ -256,6 +264,7 @@ func cli(args []string, stdout, stderr io.Writer) int {
 	format := fs.String("format", "table", "table or json")
 	strict := fs.Bool("strict", false, "fail on FEATURE_ABSENT")
 	timeout := fs.Duration("timeout", 10*time.Second, "per-request timeout")
+	mounts := fs.String("mount", "", "comma-separated type=path pairs to mount before running (e.g. transform@transform); already-mounted paths are tolerated")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -278,6 +287,34 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		return fail(err)
 	}
 	client := &http.Client{Timeout: *timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if *mounts != "" {
+		for _, spec := range strings.Split(*mounts, ",") {
+			spec = strings.TrimSpace(spec)
+			if spec == "" {
+				continue
+			}
+			typ, path, ok := strings.Cut(spec, "@")
+			if !ok || typ == "" || path == "" {
+				return fail(fmt.Errorf("invalid --mount entry %q (want type@path)", spec))
+			}
+			body, _ := json.Marshal(map[string]string{"type": typ})
+			req, err := http.NewRequest(http.MethodPost, *target+"/v1/sys/mounts/"+path, bytes.NewReader(body))
+			if err != nil {
+				return fail(err)
+			}
+			req.Header.Set("X-Vault-Token", *token)
+			resp, err := client.Do(req)
+			if err != nil {
+				return fail(err)
+			}
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			// 204/200 = mounted; 400 with "already in use" = tolerated.
+			if resp.StatusCode/100 != 2 && !strings.Contains(string(respBody), "already in use") {
+				return fail(fmt.Errorf("--mount %s failed: HTTP %d %s", spec, resp.StatusCode, strings.TrimSpace(string(respBody))))
+			}
+		}
+	}
 	results := runSpecs(client, *target, *token, specs)
 	if *format == "json" {
 		enc := json.NewEncoder(stdout)
