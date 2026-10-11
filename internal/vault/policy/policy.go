@@ -536,9 +536,10 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 				factor.Identity.GroupNamesHCL = nil
 			}
 
-			if len(factor.ControlledCapabilities) == 0 {
-				return fmt.Errorf("factor %d: missing controlled capabilities", i)
-			}
+			// Controlled capabilities are optional: when omitted, the factor
+			// is checked for every operation on the path, matching the Vault
+			// Enterprise control-group documentation. validateControlGroup
+			// treats a nil ControlledCapabilities as always-applicable.
 
 			if factor.Identity.Approvals <= 0 {
 				return fmt.Errorf("factor %d: missing required approvals", i)

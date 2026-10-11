@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-config-control-group-shapes
+feature: control-group
+source: https://developer.hashicorp.com/vault/api-docs/system/config-control-group
+source_version: v2.x (latest)
+notes: >-
+  Companion to 00-config.yaml that pins the live-verified response shapes that
+  file deliberately leaves shape-agnostic. The docs sample reads
+  {"max_ttl": "4h"} with no HTTP envelope; live observation shows the standard
+  logical envelope with max_ttl under data, in Go duration formatting
+  ("4h0m0s") rather than the sample's "4h". A config that was never set (or
+  was deleted) reads back "0s". POST with a negative max_ttl is rejected 400.
+  Assumes no concurrent control-group configuration users.
+cases:
+  - id: read-default-shape
+    request:
+      method: GET
+      path: /v1/sys/config/control-group
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [max_ttl]
+            properties:
+              max_ttl: {type: string}
+      exact: {data.max_ttl: "0s"}
+  - id: post-max-ttl-shape
+    request:
+      method: POST
+      path: /v1/sys/config/control-group
+      body: {max_ttl: 14400}
+    expect:
+      status: [204]
+  - id: read-after-post-shape
+    request:
+      method: GET
+      path: /v1/sys/config/control-group
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [max_ttl]
+            properties:
+              max_ttl: {type: string}
+      exact: {data.max_ttl: 4h0m0s}
+  - id: delete-shape
+    request:
+      method: DELETE
+      path: /v1/sys/config/control-group
+    expect:
+      status: [204]
+  - id: read-after-delete-shape
+    request:
+      method: GET
+      path: /v1/sys/config/control-group
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [max_ttl]
+            properties:
+              max_ttl: {type: string}
+      exact: {data.max_ttl: "0s"}
+  - id: post-negative-shape
+    request:
+      method: POST
+      path: /v1/sys/config/control-group
+      body: {max_ttl: -5}
+    expect:
+      status: [400]
+      errors_contain: ["max_ttl"]

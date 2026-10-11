@@ -36,7 +36,7 @@ func TestPatchContentType(t *testing.T) {
 			if override != "" {
 				c.Request.Headers = map[string]string{"Content-Type": override}
 			}
-			verdict, _, detail, _ := runCase(server.Client(), server.URL, "", "", "", c)
+			verdict, _, detail, _ := runCase(server.Client(), server.URL, "", map[string]string{}, "", c)
 			if verdict != "PASS" {
 				t.Fatalf("%s: %s", verdict, detail)
 			}

@@ -30,7 +30,7 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 	out := []Result{}
 	for _, s := range specs {
 		verdicts := map[string]string{}
-		capturedToken := ""
+		capturedData := map[string]string{}
 		for _, c := range s.Cases {
 			r := Result{File: s.File, API: s.API, Feature: s.Feature, Case: c.ID}
 			for _, dep := range c.Depends {
@@ -42,12 +42,12 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 			}
 			if r.Verdict == "" {
 				var verdict, newCaptured string
-				verdict, r.Status, r.Detail, newCaptured = runCase(client, target, token, capturedToken, s.Feature, c)
+				verdict, r.Status, r.Detail, newCaptured = runCase(client, target, token, capturedData, s.Feature, c)
 				r.Verdict = verdict
 				// Only capture cases produce a token; other cases must not
 				// erase a previously captured one.
 				if newCaptured != "" {
-					capturedToken = newCaptured
+					capturedData["token"] = newCaptured
 				}
 			}
 			verdicts[c.ID] = r.Verdict
@@ -59,8 +59,9 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 
 // runCase executes one case. It returns the verdict, HTTP status, detail,
 // and the token captured from this response (auth.client_token) when the
-// case requests capture.
-func runCase(client *http.Client, target, token, capturedToken, feature string, c Case) (string, int, string, string) {
+// case requests capture. Named capture slots live in capturedData, which is
+// shared across the cases of one spec file.
+func runCase(client *http.Client, target, token string, capturedData map[string]string, feature string, c Case) (string, int, string, string) {
 	captured := ""
 	var payload []byte
 	if c.Request.BodyRaw != "" {
@@ -76,7 +77,11 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 		if err := c.Request.Body.Decode(&v); err != nil {
 			return "ERROR", 0, err.Error(), captured
 		}
-		var err error
+		sub, err := substituteCaptured(v, capturedData)
+		if err != nil {
+			return "ERROR", 0, err.Error(), captured
+		}
+		v = sub
 		payload, err = json.Marshal(v)
 		if err != nil {
 			return "ERROR", 0, err.Error(), captured
@@ -99,8 +104,19 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 		req.Header.Set(k, v)
 	}
 	effectiveToken := token
-	if c.UseCapturedToken && capturedToken != "" {
-		effectiveToken = capturedToken
+	switch use := c.UseCapturedToken.(type) {
+	case bool:
+		if use && capturedData["token"] != "" {
+			effectiveToken = capturedData["token"]
+		}
+	case string:
+		if use != "" {
+			if named, ok := capturedData[use]; ok {
+				effectiveToken = named
+			} else {
+				return "ERROR", 0, "unknown capture slot " + use, captured
+			}
+		}
 	}
 	if effectiveToken != "" && !c.NoAuth {
 		req.Header.Set("X-Vault-Token", effectiveToken)
@@ -167,11 +183,56 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 	if c.CaptureToken {
 		if authMap, ok := body.(map[string]any)["auth"].(map[string]any); ok {
 			if tok, ok := authMap["client_token"].(string); ok {
+				capturedData["token"] = tok
 				captured = tok
 			}
 		}
 	}
+	for name, path := range c.Capture {
+		if v, ok := lookupPath(body, path); ok {
+			if s, ok := v.(string); ok {
+				capturedData[name] = s
+			}
+		}
+	}
 	return "PASS", status, fmt.Sprintf("HTTP %d; all assertions matched", status), captured
+}
+
+// substituteCaptured replaces string values starting with "$" in a decoded
+// request body with the named capture slot. Unknown names are an error so
+// stale references fail loudly instead of sending literal "$name".
+func substituteCaptured(v any, capturedData map[string]string) (any, error) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			sub, err := substituteCaptured(val, capturedData)
+			if err != nil {
+				return nil, err
+			}
+			t[k] = sub
+		}
+		return t, nil
+	case []any:
+		for i, val := range t {
+			sub, err := substituteCaptured(val, capturedData)
+			if err != nil {
+				return nil, err
+			}
+			t[i] = sub
+		}
+		return t, nil
+	case string:
+		if strings.HasPrefix(t, "$") {
+			name := t[1:]
+			if val, ok := capturedData[name]; ok {
+				return val, nil
+			}
+			return nil, fmt.Errorf("unknown capture reference $%s", name)
+		}
+		return t, nil
+	default:
+		return v, nil
+	}
 }
 func exitCode(results []Result, strict bool) int {
 	for _, r := range results {

@@ -52,6 +52,14 @@ cases:
       body: null                  # optional: assert empty body (204-style)
       absent: [data.kv]           # optional: dotted keys that must NOT be present
                                   # (missing ancestors count as absent)
+
+# Capture + substitution (one spec file = one run; slots are file-scoped):
+#   capture_token: true              # shorthand for capture: {token: auth.client_token}
+#   capture: {accessor: wrap_info.accessor}   # named slots from dotted response paths
+#   use_captured_token: true         # send slot "token" as X-Vault-Token
+#   use_captured_token: accessor     # send the named slot instead
+# Body strings beginning with "$" are substituted from the captured slots:
+#   body: {accessor: "$accessor"}    # unknown names fail the case with ERROR
 ```
 
 ### body_schema subset

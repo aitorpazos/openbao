@@ -68,6 +68,8 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/http/handler.go` | +1 route in `injectDataIntoTopRoutes`: `/v1/sys/storage/raft/autopilot/state` | Documented Enterprise autopilot-state sample is a top-level payload, not a `data` envelope | — |
 | `internal/helper/identity/mfa/types.proto` | +`enable_self_enrollment` on TOTP method config (field 9) + regenerated `types.pb.go` | Login-MFA TOTP self-enrollment flag (api-docs/secret/identity/mfa/totp, v2.x (latest)) | — |
 | `internal/vault/identity/store.go` | +`handleLoginMFASelfEnrollUpdate` handler + path registration for `identity/mfa/method/totp/self-enroll` (requires `mfa_request_id`+`mfa_method_id`, entity-backed token, enabled method) | Documented self-enrollment endpoint; binds enrollment to the caller's unexpired pending login without consuming it | — |
+| `internal/vault/policy/policy.go` | Removed "missing controlled capabilities" parse error for a control_group factor without `controlled_capabilities` | Vault Enterprise control-group docs: `controlled_capabilities` is optional — when omitted the factor applies to every operation on the path; `validateControlGroup` already treats nil as always-applicable | — |
+| `internal/vault/request_handling.go` | In the approved control-group deferred-unwrap path: `deferredReq.WrapInfo = nil` before re-execution; explicit `tokenStore.UseToken` consumption after the deferred request runs | Re-executing the stored request as-is re-wrapped the response (wrap-of-the-wrap) instead of returning the original data; the early return also bypassed the normal use-count decrement, leaving the wrapping token reusable after a successful unwrap (response-wrapping tokens are single-use) | — |
 | `internal/vault/identity/mfa.go` | +`ValidateMFASelfEnrollment` (pop+re-push pending under queue lock, namespace/entity binding) + `enable_self_enrollment` on config create/read | Self-enrollment semantics: enrollment must not consume the pending login; non-entity tokens rejected | — |
 | `internal/vault/login_mfa.go` | +`enable_self_enrollment` persisted on login MFA TOTP method config (create/update/read) | Operator-visible knob enabling self-enrollment per method | — |
 | `internal/vault/logical_system_raft.go` | `raftStoragePaths()` prepends `b.snapshotLoadPaths()` (return append pattern) | Registers `/sys/storage/raft/snapshot-load` (POST/LIST/GET/DELETE) + `/sys/storage/raft/snapshot-auto/snapshot-load/:name` when raft storage is in use | — |
@@ -278,6 +280,39 @@ Key behaviors confirmed live (dev server, port 8400):
 - Namespace deletion is asynchronous (DELETE → 200
   `{"status":"in-progress"}`); a parent delete may transiently 400 until a
   child's async deletion completes (specs document and tolerate this).
+
+
+### Control groups (compat-control-group branch)
+
+Additive (`compat/`): `compat/specs/control-group/` — adds `05-config-shapes.yaml`
+(live-verified readback shapes: max_ttl under `data`, Go duration formatting
+"4h0m0s" vs the docs sample's "4h"; post-delete default "0s") and
+`10-control-group-flow.yaml` (20-case full flow: policy with control_group
+factor, wrap of a controlled request, status/authorize round trip, self-auth
+denial, non-member no-op, group-member approval, approved unwrap returning the
+original read data, post-unwrap single-use rejection, accessor validation).
+Harness gained named `capture`/`use_captured_token` (body strings starting
+with `$` substitute from captured slots; token is the default slot). The
+pre-existing `00-config.yaml`/`10-request-validation.yaml` (config CRUD +
+missing-accessor validation) remain as-is.
+
+Core seams (ledger rows above):
+
+- `policy/policy.go`: a control_group factor without `controlled_capabilities`
+  no longer fails policy parsing — the docs make the field optional (factor
+  applies to all operations).
+- `request_handling.go` (approved deferred unwrap): strips the stored
+  request's WrapInfo before re-execution (the wrap-of-the-wrap bug: unwrap
+  returned a NEW wrapping token instead of the original data) and consumes the
+  wrapping token's use count explicitly after the deferred request runs (the
+  early return bypassed `UseToken`, leaving the token reusable).
+- Confirmed live behaviors behind the specs: wrap TTL becomes the control
+  group's policy TTL (14400 observed) rather than the requested 120;
+  `request_data` is null for a wrapped GET; a pending unwrap attempt returns
+  400 WITHOUT consuming the wrapping token (status/authorize retries safe);
+  the token owner is rejected as approver ("token owner cannot be approver",
+  plain 500 — status not documented); a non-group-member authorize is a
+  200 no-op (approved stays false).
 
 ### Raft snapshot-load (compat-harness branch)
 

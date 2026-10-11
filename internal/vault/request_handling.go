@@ -959,7 +959,20 @@ func (c *Core) handleCancelableRequest(ctx context.Context, req *logical.Request
 							return nil, fmt.Errorf("cannot find namespace for token: %w", err)
 						}
 						deferredReqCtx := namespace.ContextWithNamespace(ctx, deferredReqNS)
-						return c.handleCancelableRequest(deferredReqCtx, deferredReq)
+						// The deferred request still carries the original wrap
+						// info; re-executing it as-is would wrap the response a
+						// second time instead of returning the original data.
+						// Strip it before re-execution.
+						deferredReq.WrapInfo = nil
+						resp, rErr := c.handleCancelableRequest(deferredReqCtx, deferredReq)
+						// The deferred path returns before the normal request
+						// flow decrements the wrapping token's use count, which
+						// would leave an approved wrapping token reusable.
+						// Consume it explicitly so unwrap stays single-use.
+						if _, uErr := c.tokenStore.UseToken(ctx, tokenEntry); uErr != nil {
+							c.logger.Error("failed to use control group wrapping token", "error", uErr)
+						}
+						return resp, rErr
 					}
 				}
 			}

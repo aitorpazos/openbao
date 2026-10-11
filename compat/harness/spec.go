@@ -29,11 +29,17 @@ type Case struct {
 	Depends []string `yaml:"depends"`
 	// CaptureToken stores auth.client_token from a successful response so
 	// later cases can act as the created identity (e.g. token-based
-	// enforcement checks).
+	// enforcement checks). Shorthand for capture: {token: auth.client_token}.
 	CaptureToken bool `yaml:"capture_token"`
+	// Capture stores named values from the response body at dotted paths
+	// (e.g. {accessor: wrap_info.accessor}). Names are file-scoped and can
+	// be referenced by later cases via $name in body strings.
+	Capture map[string]string `yaml:"capture"`
 	// UseCapturedToken sends the previously captured token instead of the
-	// run token for this case.
-	UseCapturedToken bool `yaml:"use_captured_token"`
+	// run token for this case. true uses the slot named "token"
+	// (capture_token / capture: {token: ...}); a string value uses the
+	// slot with that name.
+	UseCapturedToken any `yaml:"use_captured_token"`
 	// NoAuth sends the request without any X-Vault-Token header (for
 	// verifying documented unauthenticated endpoints).
 	NoAuth  bool    `yaml:"no_auth"`

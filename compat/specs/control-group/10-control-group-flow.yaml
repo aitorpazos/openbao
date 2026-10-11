@@ -1,0 +1,331 @@
+api: control-group-flow
+feature: control-group
+source: https://developer.hashicorp.com/vault/api-docs/system/control-group
+source_version: v2.x (latest)
+notes: >-
+  Full control-group flow per the Enterprise control-group guide. A policy
+  with a control_group factor (identity group "managers", approvals=1, no
+  controlled_capabilities — the docs say an omitted field applies the factor
+  to every operation) is attached to cgtest/*. A request by a user whose
+  policy matches (alice, userpass) with X-Vault-Wrap-TTL returns a response
+  wrapping token instead of the data; the wrapping token's accessor feeds
+  POST /sys/control-group/request (status) and /sys/control-group/authorize
+  (approval). Authorizers must be members of the factor's identity group and
+  must hold ACL permission on sys/control-group/* (the docs do not state the
+  required capability; standard update is used here via the cg-authorizer
+  policy). The token owner cannot authorize their own request ("token owner
+  cannot be approver", returned as a plain 500 error — status not
+  documented). Unwrapping before all approvals is rejected with 400
+  ("wrapping token is not valid or does not exist"); after approval, unwrap
+  re-executes the deferred original request and returns its plain response
+  (no wrap_info), and the wrapping token is consumed. Observed deviation: the
+  wrapping token TTL becomes the control group's policy TTL (14400) rather
+  than the requested 120, which the docs describe only as "a limited duration
+  response wrapping token"; ttl is asserted as an integer. request_entity is
+  the full entity object (ID, name, aliases), broader than the docs' {"id",
+  "name"} sample. For a wrapped GET, request_data reads null (no request
+  body). Undocumented observed behavior, not asserted: an unwrap attempt
+  before approvals is rejected 400 ("wrapping token is not valid or does not
+  exist") WITHOUT consuming the wrapping token's use, so status polls and
+  authorize calls can be retried; after a successful unwrap the wrapping
+  token is consumed (single-use) and further unwraps fail 400. The create
+  cases tolerate 400 when a rerun hits an already-mounted/already-enabled
+  target.
+cases:
+  - id: setup-userpass
+    request:
+      method: POST
+      path: /v1/sys/auth/userpass
+      body: {type: userpass}
+    expect:
+      status: [200, 204, 400]
+  - id: setup-policy-cgtest
+    request:
+      method: POST
+      path: /v1/sys/policies/acl/cgtest
+      body:
+        policy: |
+          path "cgtest/*" {
+            capabilities = ["create", "read", "update", "delete"]
+            control_group = {
+              ttl = "4h"
+              factor "m1" {
+                identity {
+                  group_names = ["managers"]
+                  approvals = 1
+                }
+              }
+            }
+          }
+    expect:
+      status: [204]
+  - id: setup-policy-authorizer
+    request:
+      method: POST
+      path: /v1/sys/policies/acl/cg-authorizer
+      body:
+        policy: |
+          path "sys/control-group/*" {
+            capabilities = ["update"]
+          }
+    expect:
+      status: [204]
+  - id: setup-users
+    request:
+      method: POST
+      path: /v1/auth/userpass/users/alice
+      body: {password: p, policies: [cgtest, cg-authorizer]}
+    expect:
+      status: [204]
+  - id: setup-user-bob
+    request:
+      method: POST
+      path: /v1/auth/userpass/users/bob
+      body: {password: p, policies: [default, cg-authorizer]}
+    expect:
+      status: [204]
+  - id: login-alice
+    no_auth: true
+    request:
+      method: POST
+      path: /v1/auth/userpass/login/alice
+      body: {password: p}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [auth]
+        properties:
+          auth:
+            type: object
+            required: [client_token, entity_id]
+            properties:
+              client_token: {type: string}
+              entity_id: {type: string}
+    capture: {alice: auth.client_token, alice_entity: auth.entity_id}
+  - id: login-bob
+    no_auth: true
+    request:
+      method: POST
+      path: /v1/auth/userpass/login/bob
+      body: {password: p}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [auth]
+        properties:
+          auth:
+            type: object
+            required: [client_token, entity_id]
+            properties:
+              client_token: {type: string}
+              entity_id: {type: string}
+    capture: {bob: auth.client_token, bob_entity: auth.entity_id}
+  - id: create-group-managers
+    request:
+      method: POST
+      path: /v1/identity/group/name/managers
+      body:
+        type: internal
+        member_entity_ids: ["$bob_entity"]
+    expect:
+      status: [200, 204]
+  - id: mount-kv-cgtest
+    request:
+      method: POST
+      path: /v1/sys/mounts/cgtest
+      body: {type: kv, options: {version: "2"}}
+    expect:
+      status: [200, 204, 400]
+  - id: seed-kv-root
+    request:
+      method: POST
+      path: /v1/cgtest/data/key
+      body: {data: {value: secret}}
+    expect:
+      status: [200, 204]
+  - id: wrap-request-by-alice
+    use_captured_token: alice
+    request:
+      method: GET
+      path: /v1/cgtest/data/key
+      headers:
+        X-Vault-Wrap-TTL: 2m
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [wrap_info]
+        properties:
+          wrap_info:
+            type: object
+            required: [token, accessor, ttl, creation_path]
+            properties:
+              token: {type: string}
+              accessor: {type: string}
+              ttl: {type: integer}
+              creation_path: {type: string}
+      exact: {wrap_info.creation_path: cgtest/data/key}
+    capture: {accessor: wrap_info.accessor, wraptoken: wrap_info.token}
+  - id: status-pending
+    request:
+      method: POST
+      path: /v1/sys/control-group/request
+      body: {accessor: "$accessor"}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [approved, request_operation, request_path, request_entity, authorizations]
+            properties:
+              approved: {type: boolean}
+              request_operation: {type: string}
+              request_path: {type: string}
+              request_entity: {type: object}
+              authorizations: {type: array}
+      exact: {data.approved: false, data.request_path: cgtest/data/key, data.request_operation: read, data.request_data: null}
+  - id: authorize-non-member-noop
+    use_captured_token: alice
+    request:
+      method: POST
+      path: /v1/sys/control-group/authorize
+      body: {accessor: "$accessor"}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [approved]
+            properties:
+              approved: {type: boolean}
+      exact: {data.approved: false}
+  - id: add-requester-to-group
+    request:
+      method: POST
+      path: /v1/identity/group/name/managers
+      body:
+        member_entity_ids: ["$bob_entity", "$alice_entity"]
+    expect:
+      status: [204]
+  - id: self-auth-denied
+    use_captured_token: alice
+    request:
+      method: POST
+      path: /v1/sys/control-group/authorize
+      body: {accessor: "$accessor"}
+    expect:
+      status: [500]
+      errors_contain: ["token owner cannot be approver"]
+  - id: authorize-by-group-member
+    use_captured_token: bob
+    request:
+      method: POST
+      path: /v1/sys/control-group/authorize
+      body: {accessor: "$accessor"}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [approved]
+            properties:
+              approved: {type: boolean}
+      exact: {data.approved: true}
+  - id: status-approved
+    request:
+      method: POST
+      path: /v1/sys/control-group/request
+      body: {accessor: "$accessor"}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [approved, authorizations]
+            properties:
+              approved: {type: boolean}
+              authorizations:
+                type: array
+                items:
+                  type: object
+                  required: [entity_id, entity_name]
+                  properties:
+                    entity_id: {type: string}
+                    entity_name: {type: string}
+      exact: {data.approved: true}
+  - id: unwrap-after-approval
+    use_captured_token: wraptoken
+    request:
+      method: POST
+      path: /v1/sys/wrapping/unwrap
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data: {type: object}
+      exact: {data.data.value: secret}
+      absent: [wrap_info]
+  - id: unwrap-token-consumed
+    use_captured_token: wraptoken
+    request:
+      method: POST
+      path: /v1/sys/wrapping/unwrap
+    expect:
+      status: [400]
+      errors_contain: ["wrapping token is not valid or does not exist"]
+  - id: authorize-bogus-accessor
+    request:
+      method: POST
+      path: /v1/sys/control-group/authorize
+      body: {accessor: bogus}
+    expect:
+      status: [400]
+      errors_contain: ["invalid accessor"]
+  - id: request-bogus-accessor
+    request:
+      method: POST
+      path: /v1/sys/control-group/request
+      body: {accessor: bogus}
+    expect:
+      status: [400]
+      errors_contain: ["invalid accessor"]
+  - id: cleanup-unmount
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/cgtest
+    expect:
+      status: [204]
+  - id: cleanup-disable-userpass
+    request:
+      method: DELETE
+      path: /v1/sys/auth/userpass
+    expect:
+      status: [204]
+  - id: cleanup-policy-cgtest
+    request:
+      method: DELETE
+      path: /v1/sys/policies/acl/cgtest
+    expect:
+      status: [204]
+  - id: cleanup-policy-authorizer
+    request:
+      method: DELETE
+      path: /v1/sys/policies/acl/cg-authorizer
+    expect:
+      status: [204]

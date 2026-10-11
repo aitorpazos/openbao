@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -126,7 +127,7 @@ func TestVerdicts(t *testing.T) {
 				fmt.Fprint(w, tt.body)
 			}))
 			defer srv.Close()
-			v, status, _, _ := runCase(srv.Client(), srv.URL, "secret", "", tt.feature, testCase())
+			v, status, _, _ := runCase(srv.Client(), srv.URL, "secret", map[string]string{}, tt.feature, testCase())
 			if v != tt.want || status != tt.status {
 				t.Fatalf("%s %d", v, status)
 			}
@@ -137,7 +138,7 @@ func TestTransport(t *testing.T) {
 	t.Run("refused", func(t *testing.T) {
 		s := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		s.Close()
-		v, _, _, _ := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "", "", testCase())
+		v, _, _, _ := runCase(&http.Client{Timeout: time.Second}, s.URL, "", map[string]string{}, "", testCase())
 		if v != "ERROR" {
 			t.Fatal(v)
 		}
@@ -145,7 +146,7 @@ func TestTransport(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(40 * time.Millisecond); fmt.Fprint(w, `{}`) }))
 		defer s.Close()
-		v, _, _, _ := runCase(&http.Client{Timeout: time.Millisecond}, s.URL, "", "", "", testCase())
+		v, _, _, _ := runCase(&http.Client{Timeout: time.Millisecond}, s.URL, "", map[string]string{}, "", testCase())
 		if v != "ERROR" {
 			t.Fatal(v)
 		}
@@ -179,7 +180,7 @@ func TestAssertions(t *testing.T) {
 			}
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(tt.status); fmt.Fprint(w, tt.body) }))
 			defer s.Close()
-			v, _, d, _ := runCase(s.Client(), s.URL, "", "", "", spec.Cases[0])
+			v, _, d, _ := runCase(s.Client(), s.URL, "", map[string]string{}, "", spec.Cases[0])
 			if v != tt.want {
 				t.Fatalf("%s: %s", v, d)
 			}
@@ -306,6 +307,42 @@ func TestCLI(t *testing.T) {
 		})
 	}
 }
+
+// TestCaptureFlow verifies named capture slots, $name body substitution and
+// named-token selection across two cases.
+func TestCaptureFlow(t *testing.T) {
+	var gotAuth, gotBody string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/login" {
+			fmt.Fprint(w, `{"auth":{"client_token":"tok-1","entity_id":"ent-1"}}`)
+			return
+		}
+		gotAuth = r.Header.Get("X-Vault-Token")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		fmt.Fprint(w, `{"data":{"ok":true}}`)
+	}))
+	defer s.Close()
+	data := map[string]string{}
+	login := Case{ID: "login", Request: Request{Method: "POST", Path: "/v1/login"}, Expect: Expect{Status: Statuses{200}},
+		Capture: map[string]string{"alice": "auth.client_token", "ent": "auth.entity_id"}}
+	if v, _, d, _ := runCase(s.Client(), s.URL, "root", data, "", login); v != "PASS" {
+		t.Fatal(d)
+	}
+	if data["alice"] != "tok-1" || data["ent"] != "ent-1" {
+		t.Fatalf("capture: %v", data)
+	}
+	var node yaml.Node
+	yaml.Unmarshal([]byte(`{"accessor":"$ent"}`), &node)
+	use := Case{ID: "use", Request: Request{Method: "POST", Path: "/v1/do", Body: *node.Content[0]},
+		Expect: Expect{Status: Statuses{200}}, UseCapturedToken: "alice"}
+	if v, _, d, _ := runCase(s.Client(), s.URL, "root", data, "", use); v != "PASS" {
+		t.Fatal(d)
+	}
+	if gotAuth != "tok-1" || gotBody != `{"accessor":"ent-1"}` {
+		t.Fatalf("auth=%q body=%q", gotAuth, gotBody)
+	}
+}
 func TestRequest(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.Header.Get("X-Test") != "yes" || r.Header.Get("Content-Type") != "application/json" {
@@ -324,7 +361,7 @@ func TestRequest(t *testing.T) {
 	var node yaml.Node
 	yaml.Unmarshal([]byte("{n: 1}"), &node)
 	c.Request.Body = *node.Content[0]
-	v, _, d, _ := runCase(s.Client(), s.URL, "", "", "", c)
+	v, _, d, _ := runCase(s.Client(), s.URL, "", map[string]string{}, "", c)
 	if v != "PASS" {
 		t.Fatalf("%s %s", v, d)
 	}
@@ -338,7 +375,7 @@ func TestExpected404NotFeatureAbsent(t *testing.T) {
 	defer s.Close()
 	c := testCase()
 	c.Expect.Status = Statuses{200, 404}
-	v, _, d, _ := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "", "mfa-stepup", c)
+	v, _, d, _ := runCase(&http.Client{Timeout: time.Second}, s.URL, "", map[string]string{}, "mfa-stepup", c)
 	if v != "PASS" {
 		t.Fatalf("expected PASS, got %s %s", v, d)
 	}

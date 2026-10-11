@@ -208,11 +208,33 @@ func matchContains(contains map[string]any, body any) error {
 	return nil
 }
 
+// lookupPath resolves a dotted path against a decoded response body.
+// Segments index objects by key; the second value indicates whether the
+// final segment existed.
+func lookupPath(body any, path string) (any, bool) {
+	cur := body
+	for _, seg := range strings.Split(path, ".") {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		v, exists := obj[seg]
+		if !exists {
+			return nil, false
+		}
+		cur = v
+	}
+	return cur, true
+}
+
 // matchAbsent asserts that, at each dotted key, the response body does NOT
-// contain the final key segment. Namespace isolation specs use this to prove
-// a namespaced object does not leak into a root-scoped response. If an
-// ancestor key along the dotted path is missing (or not an object), the
-// target key cannot exist and the check passes for that key.
+// contain a populated value for the final key segment. Namespace isolation
+// specs use this to prove a namespaced object does not leak into a
+// root-scoped response. If an ancestor key along the dotted path is missing
+// (or not an object), the target key cannot exist and the check passes for
+// that key. A key that is present but null counts as absent: the logical
+// response envelope always serializes optional fields (e.g. wrap_info) as
+// null rather than omitting them, and a null field carries no data.
 func matchAbsent(keys []string, body any) error {
 	for _, key := range keys {
 		parts := strings.Split(key, ".")
@@ -236,7 +258,7 @@ func matchAbsent(keys []string, body any) error {
 			continue
 		}
 		if obj, ok := parent.(map[string]any); ok {
-			if _, exists := obj[last]; exists {
+			if v, exists := obj[last]; exists && v != nil {
 				return fmt.Errorf("absent %s: key is present", key)
 			}
 		}
