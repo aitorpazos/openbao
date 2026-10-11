@@ -48,6 +48,10 @@ type autoSeal struct {
 
 	healthCheckLock sync.Mutex
 	healthCheckStop chan struct{}
+
+	// Latest health-check failure, exposed without invoking the backing KMS
+	// from the public seal-backend-status endpoint.
+	backendUnhealthySince atomic.Pointer[time.Time]
 }
 
 // Ensure we are implementing the Seal interface
@@ -503,6 +507,8 @@ func (d *autoSeal) StartHealthCheck() {
 		lastSeenOk := time.Now()
 
 		fail := func(msg string, args ...any) {
+			now := time.Now()
+			d.backendUnhealthySince.CompareAndSwap(nil, &now)
 			d.logger.Warn(msg, args...)
 			if lastTestOk {
 				healthCheck.Reset(d.healthCheckIntervalUnhealthy)
@@ -545,6 +551,7 @@ func (d *autoSeal) StartHealthCheck() {
 									healthCheck.Reset(d.healthCheckInterval)
 								}
 								lastTestOk = true
+								d.backendUnhealthySince.Store(nil)
 								lastSeenOk = t
 								d.core.MetricSink().SetGauge(autoSealUnavailableDuration, 0)
 							}

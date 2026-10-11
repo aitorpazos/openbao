@@ -228,6 +228,10 @@ func dynamicFields() map[string]*framework.FieldSchema {
 // only to static roles
 func staticFields() map[string]*framework.FieldSchema {
 	fields := map[string]*framework.FieldSchema{
+		"password":              {Type: framework.TypeString, Description: "Current password for a static account imported without initial rotation."},
+		"self_managed_password": {Type: framework.TypeString, Description: "Deprecated alias for password on self-managed connections."},
+		"skip_import_rotation":  {Type: framework.TypeBool, Description: "Skip initial rotation; defaults to the connection's skip_static_role_import_rotation setting."},
+		"rotation_schedule":     {Type: framework.TypeString, Description: "Rotation schedule; mutually exclusive with rotation_period."},
 		"username": {
 			Type: framework.TypeString,
 			Description: `Name of the static user account for OpenBao to manage.
@@ -604,6 +608,12 @@ func (b *databaseBackend) pathStaticRoleCreateUpdate(ctx context.Context, req *l
 	role.StaticAccount.Username = username
 
 	// If it's a Create operation, both username and rotation_period must be included
+	if data.Get("rotation_schedule").(string) != "" {
+		if data.Get("rotation_period").(int) != 0 {
+			return logical.ErrorResponse("rotation_schedule and rotation_period are mutually exclusive"), nil
+		}
+		return logical.ErrorResponse("scheduled static rotation is not supported; use rotation_period"), nil
+	}
 	rotationPeriodSecondsRaw, ok := data.GetOk("rotation_period")
 	if !ok && createRole {
 		return logical.ErrorResponse("rotation_period is required to create static accounts"), nil
@@ -642,14 +652,68 @@ func (b *databaseBackend) pathStaticRoleCreateUpdate(ctx context.Context, req *l
 		return logical.ErrorResponse("credential_config validation failed: %s", err), nil
 	}
 
+	skipImport := false
+	if createRole {
+		config, err := b.DatabaseConfig(ctx, req.Storage, role.DBName)
+		if err != nil {
+			return nil, err
+		}
+		if config == nil {
+			return logical.ErrorResponse("database configuration is required"), nil
+		}
+		skipImport = config.SkipStaticRoleImportRotation != nil && *config.SkipStaticRoleImportRotation
+		if _, ok := data.Raw["skip_import_rotation"]; ok {
+			skipImport = data.Get("skip_import_rotation").(bool)
+		}
+		password := data.Get("password").(string)
+		legacy := data.Get("self_managed_password").(string)
+		managed, _ := config.ConnectionDetails["self_managed"].(bool)
+		if legacy != "" {
+			if !managed {
+				return logical.ErrorResponse("self_managed_password requires a self_managed connection"), nil
+			}
+			if password != "" && password != legacy {
+				return logical.ErrorResponse("password and self_managed_password conflict"), nil
+			}
+			password = legacy
+		}
+		if (skipImport || managed) && password == "" {
+			return logical.ErrorResponse("password is required when skipping import rotation or using self_managed"), nil
+		}
+		if password != "" && role.CredentialType != v5.CredentialTypePassword {
+			return logical.ErrorResponse("password requires password credential_type"), nil
+		}
+		role.StaticAccount.Password = password
+		if skipImport {
+			if !strutil.StrListContains(config.AllowedRoles, "*") && !strutil.StrListContainsGlob(config.AllowedRoles, name) {
+				return logical.ErrorResponse("%q is not an allowed role", name), nil
+			}
+			if !config.SupportsCredentialType(role.CredentialType) {
+				return logical.ErrorResponse("unsupported credential_type"), nil
+			}
+		}
+	}
+
 	// lvr represents the roles' LastVaultRotation
 	lvr := role.StaticAccount.LastVaultRotation
 
 	// Only call setStaticAccount if we're creating the role for the
 	// first time
 	var item *queue.Item
-	switch req.Operation {
-	case logical.CreateOperation:
+	switch {
+	case createRole && skipImport:
+		// Start the rotation clock at import without changing the supplied password.
+		lvr = time.Now()
+		role.StaticAccount.LastVaultRotation = lvr
+		entry, err := logical.StorageEntryJSON(databaseStaticRolePath+name, role)
+		if err != nil {
+			return nil, err
+		}
+		if err := req.Storage.Put(ctx, entry); err != nil {
+			return nil, err
+		}
+		item = &queue.Item{Key: name}
+	case req.Operation == logical.CreateOperation:
 		// setStaticAccount calls Storage.Put and saves the role to storage
 		resp, err := b.setStaticAccount(ctx, req.Storage, &setStaticAccountInput{
 			RoleName: name,
@@ -675,7 +739,7 @@ func (b *databaseBackend) pathStaticRoleCreateUpdate(ctx context.Context, req *l
 		item = &queue.Item{
 			Key: name,
 		}
-	case logical.UpdateOperation:
+	case req.Operation == logical.UpdateOperation:
 		// store updated Role
 		entry, err := logical.StorageEntryJSON(databaseStaticRolePath+name, role)
 		if err != nil {

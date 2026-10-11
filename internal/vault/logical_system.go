@@ -144,6 +144,8 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	b.Paths = append(b.Paths, b.rotatePaths()...)
 	b.Paths = append(b.Paths, b.generateRootPaths()...)
 	b.Paths = append(b.Paths, b.sealPaths()...)
+	b.Paths = append(b.Paths, b.sealRewrapPaths()...)
+	b.PathsSpecial.Unauthenticated = append(b.PathsSpecial.Unauthenticated, "seal-backend-status")
 	b.Paths = append(b.Paths, b.statusPaths()...)
 	b.Paths = append(b.Paths, b.pluginsCatalogListPaths()...)
 	b.Paths = append(b.Paths, b.pluginsCatalogCRUDPath())

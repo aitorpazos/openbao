@@ -31,8 +31,9 @@ var (
 // DatabaseConfig is used by the Factory function to configure a Database
 // object.
 type DatabaseConfig struct {
-	PluginName    string `json:"plugin_name" mapstructure:"plugin_name"`
-	PluginVersion string `json:"plugin_version" mapstructure:"plugin_version"`
+	SkipStaticRoleImportRotation *bool  `json:"skip_static_role_import_rotation" mapstructure:"skip_static_role_import_rotation"`
+	PluginName                   string `json:"plugin_name" mapstructure:"plugin_name"`
+	PluginVersion                string `json:"plugin_version" mapstructure:"plugin_version"`
 	// ConnectionDetails stores the database specific connection settings needed
 	// by each database type.
 	ConnectionDetails map[string]any `json:"connection_details" mapstructure:"connection_details"`
@@ -139,6 +140,14 @@ func pathConfigurePluginConnection(b *databaseBackend) *framework.Path {
 				Description: `The version of the plugin to use.`,
 			},
 
+			"skip_static_role_import_rotation": {
+				Type:        framework.TypeBool,
+				Description: "Skip initial password rotation when importing static roles unless overridden by the role.",
+			},
+			"self_managed": {
+				Type:        framework.TypeBool,
+				Description: "Use static account credentials instead of root credentials (PostgreSQL).",
+			},
 			"verify_connection": {
 				Type:    framework.TypeBool,
 				Default: true,
@@ -288,9 +297,15 @@ func (b *databaseBackend) connectionReadHandler() framework.OperationFunc {
 		delete(config.ConnectionDetails, "password")
 		delete(config.ConnectionDetails, "private_key")
 
-		return &logical.Response{
-			Data: structtomap.Map(config),
-		}, nil
+		result := structtomap.Map(config)
+		// Preserve legacy read responses for configurations predating this option,
+		// while retaining explicit false as well as true on newly configured mounts.
+		if config.SkipStaticRoleImportRotation == nil {
+			delete(result, "skip_static_role_import_rotation")
+		} else {
+			result["skip_static_role_import_rotation"] = *config.SkipStaticRoleImportRotation
+		}
+		return &logical.Response{Data: result}, nil
 	}
 }
 
@@ -423,6 +438,15 @@ func (b *databaseBackend) connectionWriteHandler() framework.OperationFunc {
 		if passwordPolicyRaw, ok := data.GetOk("password_policy"); ok {
 			config.PasswordPolicy = passwordPolicyRaw.(string)
 		}
+		if _, ok := data.Raw["skip_static_role_import_rotation"]; ok {
+			skip := data.Get("skip_static_role_import_rotation").(bool)
+			config.SkipStaticRoleImportRotation = &skip
+		}
+
+		// Normalize the framework's boolean input before passing plugin settings on.
+		if _, ok := data.Raw["self_managed"]; ok {
+			data.Raw["self_managed"] = data.Get("self_managed").(bool)
+		}
 
 		// Remove these entries from the data before we store it keyed under
 		// ConnectionDetails.
@@ -433,6 +457,7 @@ func (b *databaseBackend) connectionWriteHandler() framework.OperationFunc {
 		delete(data.Raw, "verify_connection")
 		delete(data.Raw, "root_rotation_statements")
 		delete(data.Raw, "password_policy")
+		delete(data.Raw, "skip_static_role_import_rotation")
 
 		id, err := uuid.GenerateUUID()
 		if err != nil {
@@ -449,6 +474,14 @@ func (b *databaseBackend) connectionWriteHandler() framework.OperationFunc {
 				config.ConnectionDetails = make(map[string]any)
 			}
 			maps.Copy(config.ConnectionDetails, data.Raw)
+		}
+
+		if managed, _ := config.ConnectionDetails["self_managed"].(bool); managed {
+			for _, field := range []string{"username", "password"} {
+				if value, _ := config.ConnectionDetails[field].(string); value != "" {
+					return logical.ErrorResponse("self_managed is mutually exclusive with %s", field), nil
+				}
+			}
 		}
 
 		// Create a database plugin and initialize it.
