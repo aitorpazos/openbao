@@ -1313,6 +1313,7 @@ func (c *Core) configureLogicalBackends(backends map[string]logical.Factory, log
 	// Transform configuration resources.
 	logicalBackends["transform"] = TransformBackendFactory
 	logicalBackends["kmip"] = KMIPBackendFactory
+	logicalBackends["keymgmt"] = KeyMgmtBackendFactory
 	logicalBackends["spiffe"] = spiffeFactory(false, c.redirectAddr)
 
 	// Cubbyhole

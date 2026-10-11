@@ -19,6 +19,10 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/vault/core.go` | +1 factory registration: `logicalBackends["keymgmt"] = KeyMgmtBackendFactory` | Mount-local key management backend | — |
+| `internal/vault/logical_system.go` | +1 registration: `b.Paths = append(b.Paths, b.managedKeyPaths()...)` | Managed-key registry configuration CRUD | — |
+| `internal/vault/logical_keymgmt.go`, `internal/vault/logical_system_managed_keys.go` (new) | Local cryptographic key lifecycle, provider configuration, managed-key configuration validation and persistence | Clean-room public API compatibility; cloud/HSM operations and allowed-managed-key mount integration deferred, configuration writes warn explicitly | — |
+| `internal/vault/logical_managed_keys_test.go` (new) | Registry validation/CRUD and key management lifecycle tests | Verify local persistence, rotation, private-material redaction and deletion protection | — |
 | `internal/vault/logical_system_license_usage.go` (new) | Additive license/usage handlers with namespace checks, date/input validation and barrier-backed config | License-free status and documented response shapes; activity collection/export and KV/PKI/per-auth-lease measurement remain unavailable and are explicitly warned, not represented as measured utilization | — |
 | `internal/vault/logical_system_license_usage_test.go` (new) | Endpoint, invalid-input, namespace and no-op/persistence tests | Exercise license-free semantics, empty activity representation and config atomic validation/preservation | — |
 | `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.licenseUsagePaths()...)` | License-free status, utilization snapshot and internal-counter compatibility paths; existing entities path unchanged. Billing activity collection/export unavailable and explicitly warned; empty reports are not measured utilization | — |
