@@ -546,6 +546,10 @@ func (b *SystemBackend) handleStorageRaftAutopilotConfigRead() framework.Operati
 		if config == nil {
 			return nil, nil
 		}
+		stored, err := b.Core.loadAutopilotAPIConfiguration(ctx)
+		if err != nil {
+			return nil, err
+		}
 
 		return &logical.Response{
 			Data: map[string]any{
@@ -555,6 +559,7 @@ func (b *SystemBackend) handleStorageRaftAutopilotConfigRead() framework.Operati
 				"max_trailing_logs":                  config.MaxTrailingLogs,
 				"min_quorum":                         config.MinQuorum,
 				"server_stabilization_time":          config.ServerStabilizationTime.String(),
+				"disable_upgrade_migration":          stored.DisableUpgradeMigration,
 			},
 		}, nil
 	}
@@ -568,15 +573,16 @@ func (b *SystemBackend) handleStorageRaftAutopilotConfigUpdate() framework.Opera
 		}
 
 		// Read autopilot configuration from storage
-		config, err := b.Core.loadAutopilotConfiguration(ctx)
+		config, err := b.Core.loadAutopilotAPIConfiguration(ctx)
 		if err != nil {
-			b.logger.Error("failed to load autopilot config from storage when setting up cluster; continuing since autopilot falls back to default config", "error", err)
-		}
-		if config == nil {
-			config = &raft.AutopilotConfig{}
+			return nil, err
 		}
 
 		persist := false
+		if value, ok := d.GetOk("disable_upgrade_migration"); ok {
+			config.DisableUpgradeMigration = value.(bool)
+			persist = true
+		}
 		cleanupDeadServers, ok := d.GetOk("cleanup_dead_servers")
 		if ok {
 			if cleanupDeadServers.(bool) {
@@ -613,7 +619,7 @@ func (b *SystemBackend) handleStorageRaftAutopilotConfigUpdate() framework.Opera
 		}
 
 		effectiveConf := raftBackend.AutopilotConfig()
-		effectiveConf.Merge(config)
+		effectiveConf.Merge(&config.AutopilotConfig)
 
 		if effectiveConf.CleanupDeadServers && effectiveConf.MinQuorum < 3 {
 			return logical.ErrorResponse("min_quorum must be set when cleanup_dead_servers is set and it should at least be 3; cleanup_dead_servers: %#v, min_quorum: %#v", effectiveConf.CleanupDeadServers, effectiveConf.MinQuorum), logical.ErrInvalidRequest

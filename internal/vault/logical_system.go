@@ -4089,7 +4089,7 @@ func (b *SystemBackend) pathInternalUIMountRead(ctx context.Context, req *logica
 func (b *SystemBackend) pathInternalUINamespacesRead(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 	// Short-circuit here if there's no client token provided
 	if req.ClientToken == "" {
-		return nil, errors.New("client token empty")
+		return nil, logical.ErrPermissionDenied
 	}
 
 	// Load the ACL policies so we can check for access and filter namespaces
@@ -4111,7 +4111,7 @@ func (b *SystemBackend) pathInternalUINamespacesRead(ctx context.Context, req *l
 		return nil, err
 	}
 
-	list, err := b.Core.namespaceStore.ListNamespaces(ctx, ListNamespaceOpts{IncludeSealed: true})
+	list, err := b.Core.namespaceStore.ListNamespaces(ctx, ListNamespaceOpts{Recursive: true, IncludeSealed: true})
 	if err != nil {
 		return nil, errors.New("failed to list namespaces")
 	}
@@ -4124,6 +4124,7 @@ func (b *SystemBackend) pathInternalUINamespacesRead(ctx context.Context, req *l
 		}
 	}
 
+	sort.Strings(nsList)
 	return logical.ListResponse(nsList), nil
 }
 
