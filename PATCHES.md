@@ -19,6 +19,10 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.rotationOrphanPaths()...)` | Root-only GET rotation/orphans (optional trailing slash); no LDAP/OS-account scheduler exists, so orphan list is empty | — |
+| `internal/vault/logical_system_quotas.go` | group_by/secondary_rate field schemas, validation helper call, assignment before storage, readback fields | Identity quota configuration round-trip; request admission remains IP-based (entity and aggregate enforcement deferred) | — |
+| `internal/vault/quotas/quotas_rate_limit.go` | Persisted GroupBy/SecondaryRate fields, clone copies, legacy GroupBy default | Preserve grouping configuration across persistence and manager copies without changing existing limiter behavior | — |
+| `internal/vault/audit.go` | +3 lines: validateAuditFilterOptions under auditLock before backend creation | Validate filter/fallback/exclude and atomically enforce fallback uniqueness; existing mount options supply persistence/readback. Log filtering, fallback routing and exclusion execution deferred | — |
 | `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.enterpriseConfigPaths()...)` | Registers group-policy-application and UI custom-message/default-auth configuration APIs; namespace-local barrier storage; group policy evaluation and UI consumption are separate integrations | — |
 | `internal/vault/logical_system.go` | +1 path registration: `b.oauthResourceServerPaths()` | Namespace-scoped OAuth resource server configuration API (configuration only; JWT authentication deferred) | — |
 | `internal/vault/core.go` | +1 factory registration: `logicalBackends["agent-registry"] = c.agentRegistryFactory` | Agent registry backend at documented root-level path | — |

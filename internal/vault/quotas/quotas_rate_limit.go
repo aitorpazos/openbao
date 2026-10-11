@@ -64,6 +64,11 @@ type RateLimitQuota struct {
 	// Rate defines the number of requests allowed per Interval.
 	Rate float64 `json:"rate"`
 
+	// GroupBy and SecondaryRate retain identity grouping configuration. The
+	// current request admission path still supplies only a client IP.
+	GroupBy       string  `json:"group_by"`
+	SecondaryRate float64 `json:"secondary_rate"`
+
 	// Interval defines the duration to which rate limiting is applied.
 	Interval time.Duration `json:"interval"`
 
@@ -126,6 +131,8 @@ func (q *RateLimitQuota) Clone() Quota {
 		PathSuffix:    q.PathSuffix,
 		BlockInterval: q.BlockInterval,
 		Rate:          q.Rate,
+		GroupBy:       q.GroupBy,
+		SecondaryRate: q.SecondaryRate,
 		Interval:      q.Interval,
 		Inheritable:   q.Inheritable,
 	}
@@ -151,6 +158,9 @@ func (rlq *RateLimitQuota) initialize(logger log.Logger, ms *metricsutil.Cluster
 
 	if rlq.Interval == 0 {
 		rlq.Interval = time.Second
+	}
+	if rlq.GroupBy == "" {
+		rlq.GroupBy = "ip"
 	}
 
 	if rlq.Rate <= 0 {

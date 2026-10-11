@@ -144,6 +144,15 @@ The 'rate' must be positive.`,
 					Type:        framework.TypeDurationSecond,
 					Description: "The duration to enforce rate limiting for (default '1s').",
 				},
+				"group_by": {
+					Type:        framework.TypeString,
+					Default:     "ip",
+					Description: "Request grouping configuration: ip, none, entity_then_ip, or entity_then_none. Identity enforcement is not yet supported.",
+				},
+				"secondary_rate": {
+					Type:        framework.TypeFloat,
+					Description: "Fallback rate for identity grouping; defaults to rate.",
+				},
 				"block_interval": {
 					Type: framework.TypeDurationSecond,
 					Description: `If set, when a client reaches a rate limit threshold, the client will be prohibited
@@ -196,6 +205,8 @@ quota exists. Can only be set on namespace quotas. A quota on the root namespace
 									Type:     framework.TypeFloat,
 									Required: true,
 								},
+								"group_by":       {Type: framework.TypeString, Required: true},
+								"secondary_rate": {Type: framework.TypeFloat, Required: true},
 								"interval": {
 									Type:     framework.TypeInt,
 									Required: true,
@@ -300,6 +311,13 @@ func (b *SystemBackend) handleRateLimitQuotasUpdate() framework.OperationFunc {
 		}
 
 		interval := time.Second * time.Duration(d.Get("interval").(int))
+		groupBy := d.Get("group_by").(string)
+		secondaryRate := d.Get("secondary_rate").(float64)
+		_, secondarySet := d.Raw["secondary_rate"]
+		groupBy, secondaryRate, err := quotas.ValidateIdentityRateConfig(groupBy, rate, secondaryRate, secondarySet)
+		if err != nil {
+			return logical.ErrorResponse(err.Error()), nil
+		}
 		if interval == 0 {
 			interval = time.Second
 		}
@@ -386,6 +404,8 @@ func (b *SystemBackend) handleRateLimitQuotasUpdate() framework.OperationFunc {
 			quota = rlq
 		}
 
+		rlq := quota.(*quotas.RateLimitQuota)
+		rlq.GroupBy, rlq.SecondaryRate = groupBy, secondaryRate
 		entry, err := logical.StorageEntryJSON(quotas.QuotaStoragePath(qType, name), quota)
 		if err != nil {
 			return nil, err
@@ -429,6 +449,8 @@ func (b *SystemBackend) handleRateLimitQuotasRead() framework.OperationFunc {
 			"path":           nsPath + rlq.MountPath + rlq.PathSuffix,
 			"role":           rlq.Role,
 			"rate":           rlq.Rate,
+			"group_by":       rlq.GroupBy,
+			"secondary_rate": rlq.SecondaryRate,
 			"interval":       int(rlq.Interval.Seconds()),
 			"block_interval": int(rlq.BlockInterval.Seconds()),
 			"inheritable":    rlq.Inheritable,

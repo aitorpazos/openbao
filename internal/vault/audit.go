@@ -88,6 +88,9 @@ func (c *Core) enableAudit(ctx context.Context, entry *routing.MountEntry, updat
 	defer c.auditLock.Unlock()
 
 	// Look for matching name
+	if err := validateAuditFilterOptions(entry, c.audit.Entries); err != nil {
+		return err
+	}
 	for _, ent := range c.audit.Entries {
 		switch {
 		// Existing is sql/mysql/ new is sql/ or
