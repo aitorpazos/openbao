@@ -1,0 +1,30 @@
+api: secrets_sync_gh
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#create-update-github-repository-action-destination
+source_version: "v2.x (latest)"
+notes: >
+  Activated disposable target; reserve compat-sync-gh-invalid. Test the explicit
+  secrets_location and organization_visibility enums, app installation requirement
+  and documented boolean type. Do not infer that optional access_token must be
+  present: GitHub app authentication is an alternative. Invalid-data 400/errors
+  and DELETE success codes: https://developer.hashicorp.com/vault/api-docs
+  (v2.x (latest)); Delete destination on source page. Deny provider egress; no
+  real tokens, app configuration or associations. Error precedence is unspecified.
+cases:
+  - id: gh-invalid-location
+    request: {method: POST, path: /v1/sys/sync/destinations/gh/compat-sync-gh-invalid, body: {secrets_location: environment}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: gh-invalid-visibility
+    request: {method: POST, path: /v1/sys/sync/destinations/gh/compat-sync-gh-invalid, body: {secrets_location: organization, organization_name: compat-invalid, organization_visibility: public}}
+    expect: *invalid
+  - id: gh-app-missing-installation
+    request: {method: POST, path: /v1/sys/sync/destinations/gh/compat-sync-gh-invalid, body: {app_name: compat-sync-unconfigured-app, repository_owner: compat-invalid, repository_name: compat-invalid}}
+    expect: *invalid
+  - id: gh-invalid-networking-boolean
+    request: {method: POST, path: /v1/sys/sync/destinations/gh/compat-sync-gh-invalid, body: {disable_strict_networking: not-a-boolean}}
+    expect: *invalid
+  - id: gh-cleanup
+    request: {method: DELETE, path: /v1/sys/sync/destinations/gh/compat-sync-gh-invalid}
+    expect: {status: [200, 204]}

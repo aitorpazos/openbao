@@ -1,0 +1,27 @@
+api: secrets_sync_destinations_list
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#list-destinations
+source_version: "v2.x (latest)"
+notes: >
+  Unified endpoint is LIST /sys/sync/destinations, NOT GET /sys/secrets-sync/destinations.
+  Generic empty-list 404: https://developer.hashicorp.com/vault/api-docs
+  (v2.x (latest)). Optional data schema checks populated results; harness v1 has
+  no status-conditional schema. A 404 here may be an empty list OR absent feature,
+  so this case is not a feature-presence gate. Non-list validation cases disallow
+  404 and preserve FEATURE_ABSENT. No global list-content equality assumptions.
+cases:
+  - id: destinations-list-unified
+    request: {method: LIST, path: /v1/sys/sync/destinations}
+    expect:
+      status: [200, 404]
+      body_schema:
+        type: object
+        properties:
+          data:
+            type: object
+            required: [keys, key_info, total_destinations]
+            properties:
+              keys: {type: array, items: {type: string}}
+              key_info: {type: object}
+              total_destinations: {type: integer}
+          errors: {type: array, items: {type: string}}

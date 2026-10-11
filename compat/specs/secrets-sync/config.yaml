@@ -1,0 +1,40 @@
+api: secrets_sync_config
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#configuration
+source_version: "v2.x (latest)"
+notes: >
+  Root or administrative namespace, feature already activated, disposable server.
+  PATCH is the only documented config operation; no GET is assumed. Empty PATCH
+  supplies no changes and checks the documented response fields without setting
+  cluster-wide values. Invalid-data 400 and errors envelope derive from
+  https://developer.hashicorp.com/vault/api-docs (v2.x (latest)), not endpoint
+  error examples. No exact error text or undocumented capacity range asserted.
+cases:
+  - id: config-noop-shape
+    request: {method: PATCH, path: /v1/sys/sync/config, body: {}}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [disabled, queue_capacity]
+            properties:
+              disabled: {type: boolean}
+              queue_capacity: {type: integer}
+  - id: config-invalid-disabled
+    request: {method: PATCH, path: /v1/sys/sync/config, body: {disabled: not-a-boolean}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: config-invalid-capacity
+    request: {method: PATCH, path: /v1/sys/sync/config, body: {queue_capacity: not-an-integer}}
+    expect: *invalid
+  - id: config-object-disabled
+    request: {method: PATCH, path: /v1/sys/sync/config, body: {disabled: {invalid: true}}}
+    expect: *invalid
+  - id: config-object-capacity
+    request: {method: PATCH, path: /v1/sys/sync/config, body: {queue_capacity: {invalid: true}}}
+    expect: *invalid

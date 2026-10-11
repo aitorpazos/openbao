@@ -98,13 +98,16 @@ func runCase(client *http.Client, target, token, capturedToken, feature string, 
 	status := resp.StatusCode
 	expected404 := false
 	for _, want := range c.Expect.Status {
-		if want == 404 {
+		// 404/405/415 all signal a missing feature: 404 is the classic
+		// unknown path; 405/415 surface when a method (e.g. PATCH) is
+		// gated off before route resolution on targets lacking the family.
+		if want == 404 || want == 405 || want == 415 {
 			expected404 = true
 			break
 		}
 	}
-	if status == 404 && feature != "" && !expected404 {
-		return "FEATURE_ABSENT", status, "HTTP 404 (feature " + feature + ")", captured
+	if (status == 404 || status == 405 || status == 415) && feature != "" && !expected404 {
+		return "FEATURE_ABSENT", status, fmt.Sprintf("HTTP %d (feature %s)", status, feature), captured
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {

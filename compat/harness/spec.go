@@ -36,9 +36,9 @@ type Case struct {
 	UseCapturedToken bool `yaml:"use_captured_token"`
 	// NoAuth sends the request without any X-Vault-Token header (for
 	// verifying documented unauthenticated endpoints).
-	NoAuth           bool `yaml:"no_auth"`
-	Request          Request   `yaml:"request"`
-	Expect           Expect    `yaml:"expect"`
+	NoAuth  bool    `yaml:"no_auth"`
+	Request Request `yaml:"request"`
+	Expect  Expect  `yaml:"expect"`
 }
 type Request struct {
 	Method  string            `yaml:"method"`

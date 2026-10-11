@@ -1,0 +1,36 @@
+api: secrets_sync_aws_sm
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#create-update-aws-secrets-manager-destination
+source_version: "v2.x (latest)"
+notes: >
+  Already activated disposable target; reserve compat-sync-aws-invalid.
+  AWS region and static credentials are optional; an empty body is NOT a
+  missing-required-field negative. Mutually exclusive authentication, WIF role,
+  documented CIDR type and granularity are tested, not cloud connectivity.
+  Granularity: https://developer.hashicorp.com/vault/docs/sync#granularity
+  (v2.x (latest)). 400/errors and DELETE success codes derive from
+  https://developer.hashicorp.com/vault/api-docs (v2.x (latest)). Delete semantics
+  are in the source page's Delete destination section. No associations created.
+  Run without ambient credentials and with provider egress denied; validation
+  order relative to client initialization is not specified by public docs.
+cases:
+  - id: aws-conflicting-auth
+    request:
+      method: POST
+      path: /v1/sys/sync/destinations/aws-sm/compat-sync-aws-invalid
+      body: {access_key_id: compat-invalid, identity_token_audience: compat-invalid, role_arn: 'arn:aws:iam::000000000000:role/compat-invalid'}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: aws-wif-missing-role
+    request: {method: POST, path: /v1/sys/sync/destinations/aws-sm/compat-sync-aws-invalid, body: {identity_token_audience: compat-invalid}}
+    expect: *invalid
+  - id: aws-invalid-granularity
+    request: {method: POST, path: /v1/sys/sync/destinations/aws-sm/compat-sync-aws-invalid, body: {granularity: compat-invalid}}
+    expect: *invalid
+  - id: aws-invalid-ipv4-cidr
+    request: {method: POST, path: /v1/sys/sync/destinations/aws-sm/compat-sync-aws-invalid, body: {allowed_ipv4_addresses: [not-a-cidr]}}
+    expect: *invalid
+  - id: aws-cleanup
+    request: {method: DELETE, path: /v1/sys/sync/destinations/aws-sm/compat-sync-aws-invalid}
+    expect: {status: [200, 204]}

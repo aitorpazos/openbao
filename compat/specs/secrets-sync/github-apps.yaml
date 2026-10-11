@@ -1,0 +1,26 @@
+api: secrets_sync_github_apps
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#configure-a-custom-github-app
+source_version: "v2.x (latest)"
+notes: >
+  Activated disposable server; reserve compat-sync-invalid-app. Required app_id
+  and private_key are documented. No valid private key or cloud call is needed
+  for these validation negatives. 400/errors and DELETE success codes derive
+  from https://developer.hashicorp.com/vault/api-docs (v2.x (latest)). Delete
+  custom GitHub app on source page forbids active authentication references;
+  none are created here. Cleanup is unconditional and has no dependencies.
+cases:
+  - id: app-missing-all-required
+    request: {method: POST, path: /v1/sys/sync/github-apps/compat-sync-invalid-app, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: app-missing-private-key
+    request: {method: POST, path: /v1/sys/sync/github-apps/compat-sync-invalid-app, body: {app_id: '123456'}}
+    expect: *invalid
+  - id: app-missing-app-id
+    request: {method: POST, path: /v1/sys/sync/github-apps/compat-sync-invalid-app, body: {private_key: not-a-private-key}}
+    expect: *invalid
+  - id: app-cleanup
+    request: {method: DELETE, path: /v1/sys/sync/github-apps/compat-sync-invalid-app}
+    expect: {status: [200, 204]}

@@ -1,0 +1,29 @@
+api: secrets_sync_vercel_project
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#create-update-vercel-project-destination
+source_version: "v2.x (latest)"
+notes: >
+  Vercel is also documented in the provider inventory. Activated disposable
+  target; reserve compat-sync-vercel-invalid. All payloads omit at least one
+  documented required field; placeholder access_token is not usable. Invalid-data
+  400/errors and DELETE success codes: https://developer.hashicorp.com/vault/api-docs
+  (v2.x (latest)); Delete destination on source page. Deny provider egress;
+  validation ordering is unspecified. No associations created.
+cases:
+  - id: vercel-missing-all-required
+    request: {method: POST, path: /v1/sys/sync/destinations/vercel-project/compat-sync-vercel-invalid, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: vercel-missing-token
+    request: {method: POST, path: /v1/sys/sync/destinations/vercel-project/compat-sync-vercel-invalid, body: {project_id: compat-invalid, deployment_environments: [development]}}
+    expect: *invalid
+  - id: vercel-missing-project
+    request: {method: POST, path: /v1/sys/sync/destinations/vercel-project/compat-sync-vercel-invalid, body: {access_token: compat-invalid, deployment_environments: [development]}}
+    expect: *invalid
+  - id: vercel-missing-environments
+    request: {method: POST, path: /v1/sys/sync/destinations/vercel-project/compat-sync-vercel-invalid, body: {access_token: compat-invalid, project_id: compat-invalid}}
+    expect: *invalid
+  - id: vercel-cleanup
+    request: {method: DELETE, path: /v1/sys/sync/destinations/vercel-project/compat-sync-vercel-invalid}
+    expect: {status: [200, 204]}

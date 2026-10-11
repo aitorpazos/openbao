@@ -1,0 +1,28 @@
+api: secrets_sync_associations_list
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#list-associations
+source_version: "v2.x (latest)"
+notes: >
+  Lists secrets referenced by at least one association, not a standalone sync
+  status endpoint. The secret_path field in key_info differs from secret_name
+  in association objects. Dynamic map values cannot be validated by harness v1.
+  Empty-list 404: https://developer.hashicorp.com/vault/api-docs (v2.x (latest)).
+  This is not a feature gate. Data is optional because status-conditional schema
+  is unavailable, but constrained when present. No associations are created.
+cases:
+  - id: associations-list-unified
+    request: {method: LIST, path: /v1/sys/sync/associations}
+    expect:
+      status: [200, 404]
+      body_schema:
+        type: object
+        properties:
+          data:
+            type: object
+            required: [keys, key_info, total_associations, total_secrets]
+            properties:
+              keys: {type: array, items: {type: string}}
+              key_info: {type: object}
+              total_associations: {type: integer}
+              total_secrets: {type: integer}
+          errors: {type: array, items: {type: string}}

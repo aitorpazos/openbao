@@ -1,0 +1,30 @@
+api: secrets_sync_azure_kv
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#create-update-azure-key-vault-destination
+source_version: "v2.x (latest)"
+notes: >
+  Activated disposable server; reserve compat-sync-azure-invalid. The required
+  fields are key_vault_uri, client_id and tenant_id, not client_secret (managed
+  identity and WIF are alternatives). Placeholder identifiers are not credentials.
+  Invalid-data 400/errors and DELETE success codes derive from
+  https://developer.hashicorp.com/vault/api-docs (v2.x (latest)). Delete semantics
+  are on the source page. No associations. No ambient cloud credentials; deny
+  provider egress because public docs do not specify validation ordering.
+cases:
+  - id: azure-missing-all-required
+    request: {method: POST, path: /v1/sys/sync/destinations/azure-kv/compat-sync-azure-invalid, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: azure-missing-uri
+    request: {method: POST, path: /v1/sys/sync/destinations/azure-kv/compat-sync-azure-invalid, body: {client_id: '00000000-0000-0000-0000-000000000000', tenant_id: '00000000-0000-0000-0000-000000000000'}}
+    expect: *invalid
+  - id: azure-missing-client
+    request: {method: POST, path: /v1/sys/sync/destinations/azure-kv/compat-sync-azure-invalid, body: {key_vault_uri: 'https://compat-sync.invalid', tenant_id: '00000000-0000-0000-0000-000000000000'}}
+    expect: *invalid
+  - id: azure-missing-tenant
+    request: {method: POST, path: /v1/sys/sync/destinations/azure-kv/compat-sync-azure-invalid, body: {key_vault_uri: 'https://compat-sync.invalid', client_id: '00000000-0000-0000-0000-000000000000'}}
+    expect: *invalid
+  - id: azure-cleanup
+    request: {method: DELETE, path: /v1/sys/sync/destinations/azure-kv/compat-sync-azure-invalid}
+    expect: {status: [200, 204]}

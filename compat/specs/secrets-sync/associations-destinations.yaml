@@ -1,0 +1,23 @@
+api: secrets_sync_associations_destinations
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#read-destinations-by-secret
+source_version: "v2.x (latest)"
+notes: >
+  Query form uses mount and secret_name, even though the parameter prose names
+  the latter name. Both are required. Missing-parameter 400/errors derive from
+  https://developer.hashicorp.com/vault/api-docs (v2.x (latest)); endpoint-specific
+  error messages and lookup precedence are not documented. No secret creation,
+  mount creation or cloud credentials. Positive status payloads are documented
+  in notes.md but deferred until a real association fixture exists.
+cases:
+  - id: association-destinations-missing-both
+    request: {method: GET, path: /v1/sys/sync/associations/destinations}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: association-destinations-missing-mount
+    request: {method: GET, path: '/v1/sys/sync/associations/destinations?secret_name=compat-sync-nonexistent'}
+    expect: *invalid
+  - id: association-destinations-missing-secret
+    request: {method: GET, path: '/v1/sys/sync/associations/destinations?mount=compat-sync-nonexistent'}
+    expect: *invalid

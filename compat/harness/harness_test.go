@@ -98,7 +98,7 @@ func TestVerdicts(t *testing.T) {
 				fmt.Fprint(w, tt.body)
 			}))
 			defer srv.Close()
-			v, status, _ := runCase(srv.Client(), srv.URL, "secret", tt.feature, testCase())
+			v, status, _, _ := runCase(srv.Client(), srv.URL, "secret", "", tt.feature, testCase())
 			if v != tt.want || status != tt.status {
 				t.Fatalf("%s %d", v, status)
 			}
@@ -109,7 +109,7 @@ func TestTransport(t *testing.T) {
 	t.Run("refused", func(t *testing.T) {
 		s := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		s.Close()
-		v, _, _ := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "", testCase())
+		v, _, _, _ := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "", "", testCase())
 		if v != "ERROR" {
 			t.Fatal(v)
 		}
@@ -117,7 +117,7 @@ func TestTransport(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(40 * time.Millisecond); fmt.Fprint(w, `{}`) }))
 		defer s.Close()
-		v, _, _ := runCase(&http.Client{Timeout: time.Millisecond}, s.URL, "", "", testCase())
+		v, _, _, _ := runCase(&http.Client{Timeout: time.Millisecond}, s.URL, "", "", "", testCase())
 		if v != "ERROR" {
 			t.Fatal(v)
 		}
@@ -151,7 +151,7 @@ func TestAssertions(t *testing.T) {
 			}
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(tt.status); fmt.Fprint(w, tt.body) }))
 			defer s.Close()
-			v, _, d := runCase(s.Client(), s.URL, "", "", spec.Cases[0])
+			v, _, _, d := runCase(s.Client(), s.URL, "", "", "", spec.Cases[0])
 			if v != tt.want {
 				t.Fatalf("%s: %s", v, d)
 			}
@@ -296,7 +296,7 @@ func TestRequest(t *testing.T) {
 	var node yaml.Node
 	yaml.Unmarshal([]byte("{n: 1}"), &node)
 	c.Request.Body = *node.Content[0]
-	v, _, d := runCase(s.Client(), s.URL, "", "", c)
+	v, _, _, d := runCase(s.Client(), s.URL, "", "", "", c)
 	if v != "PASS" {
 		t.Fatalf("%s %s", v, d)
 	}
@@ -310,7 +310,7 @@ func TestExpected404NotFeatureAbsent(t *testing.T) {
 	defer s.Close()
 	c := testCase()
 	c.Expect.Status = Statuses{200, 404}
-	v, _, d := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "mfa-stepup", c)
+	v, _, _, d := runCase(&http.Client{Timeout: time.Second}, s.URL, "", "", "mfa-stepup", c)
 	if v != "PASS" {
 		t.Fatalf("expected PASS, got %s %s", v, d)
 	}

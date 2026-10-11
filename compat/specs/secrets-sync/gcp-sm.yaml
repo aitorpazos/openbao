@@ -1,0 +1,27 @@
+api: secrets_sync_gcp_sm
+feature: secrets-sync
+source: https://developer.hashicorp.com/vault/api-docs/system/secrets-sync#create-update-gcp-secret-manager-destination
+source_version: "v2.x (latest)"
+notes: >
+  Activated disposable target; reserve compat-sync-gcp-invalid. Credentials have
+  ADC/WIF alternatives and project_id can be inferred; neither omission is tested
+  as unconditionally invalid. These cases use documented mutual exclusion,
+  non-negative identity_token_ttl, and the JSON credentials contract. 400/errors
+  and DELETE success codes: https://developer.hashicorp.com/vault/api-docs
+  (v2.x (latest)). Delete semantics: source page. No associations. Deny provider
+  egress and remove ambient credentials; validation ordering is undocumented.
+cases:
+  - id: gcp-conflicting-auth
+    request: {method: POST, path: /v1/sys/sync/destinations/gcp-sm/compat-sync-gcp-invalid, body: {credentials: '{}', identity_token_audience: compat-invalid, service_account_email: compat@example.invalid}}
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
+  - id: gcp-negative-wif-ttl
+    request: {method: POST, path: /v1/sys/sync/destinations/gcp-sm/compat-sync-gcp-invalid, body: {identity_token_audience: compat-invalid, service_account_email: compat@example.invalid, identity_token_ttl: '-1h'}}
+    expect: *invalid
+  - id: gcp-malformed-credentials
+    request: {method: POST, path: /v1/sys/sync/destinations/gcp-sm/compat-sync-gcp-invalid, body: {credentials: 'not-json'}}
+    expect: *invalid
+  - id: gcp-cleanup
+    request: {method: DELETE, path: /v1/sys/sync/destinations/gcp-sm/compat-sync-gcp-invalid}
+    expect: {status: [200, 204]}
