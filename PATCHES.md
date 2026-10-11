@@ -19,6 +19,7 @@ NOT an additive new package is recorded here. Additive new packages
 
 | File | Nature | Why | Upstream PR |
 |------|--------|-----|-------------|
+| `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.rotationPolicyPaths()...)` | Registers root-namespace rotation-policy POST/GET/DELETE configuration API; LDAP static-role and OS-account assignment/scheduler integration deferred | — |
 | `internal/vault/logical_system.go` | +1 line: `b.Paths = append(b.Paths, b.syncPaths()...)` | Registers local Secrets Sync destination, association, GitHub-app and PATCH config APIs; provider execution deferred | — |
 | `compat/harness/main.go` | PATCH default Content-Type is `application/merge-patch+json` (explicit headers still override) | Exercise OpenBao's existing merge-patch HTTP contract rather than failing before backend dispatch | — |
 | `internal/vault/logical_system.go` | +1 path registration line in `NewSystemBackend`; +1 field (`namedMFAMethodLock`) on `SystemBackend` | Registers step-up MFA named-method paths; per-backend mutex for atomic config writes | — |

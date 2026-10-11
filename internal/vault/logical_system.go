@@ -167,6 +167,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	b.Paths = append(b.Paths, b.replicationPaths()...)
 	b.Paths = append(b.Paths, b.loginMFAPaths()...)
 	b.Paths = append(b.Paths, b.namedMFAMethodPaths()...)
+	b.Paths = append(b.Paths, b.rotationPolicyPaths()...)
 	b.Paths = append(b.Paths, b.introspectionPaths()...)
 	b.Paths = append(b.Paths, b.workflowPaths()...)
 	b.Paths = append(b.Paths, b.externalKeysPaths()...)
