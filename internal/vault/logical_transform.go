@@ -16,7 +16,7 @@ import (
 )
 
 // TransformBackendFactory provides configuration resources and FF1 FPE operations
-// for Transform. Tokenization and masking transformations are not implemented.
+// for Transform, plus builtin tokenization. Masking is not implemented.
 // Templates use the documented singular pattern field. deletion_allowed is a
 // transformation setting, not a template or role setting; resource deletion here
 // is unconditional (except for the reserved builtin namespace).
@@ -50,6 +50,7 @@ func TransformBackendFactory(ctx context.Context, conf *logical.BackendConfig) (
 		})
 	}
 	b.Paths = append(b.Paths, b.fpePaths()...)
+	b.Paths = append(b.Paths, b.tokenizationPaths()...)
 	return b, b.Setup(ctx, conf)
 }
 

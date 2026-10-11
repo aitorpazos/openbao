@@ -28,12 +28,15 @@ type transformFPEConfig struct {
 
 func (b *transformBackend) fpePaths() []*framework.Path {
 	fields := map[string]*framework.FieldSchema{"name": {Type: framework.TypeString}, "type": {Type: framework.TypeString}, "template": {Type: framework.TypeString}, "tweak_source": {Type: framework.TypeString}, "allowed_roles": {Type: framework.TypeCommaStringSlice}, "deletion_allowed": {Type: framework.TypeBool}}
+	for k, v := range transformTokenFields() {
+		fields[k] = v
+	}
 	out := []*framework.Path{{Pattern: "transformation/?", Fields: map[string]*framework.FieldSchema{"filter": {Type: framework.TypeString}}, Callbacks: map[logical.Operation]framework.OperationFunc{logical.ListOperation: b.list("transformation")}}}
 	for _, prefix := range []string{"transformation/", "transformations/fpe/"} {
-		out = append(out, &framework.Path{Pattern: prefix + framework.GenericNameRegex("name"), Fields: fields, Callbacks: map[logical.Operation]framework.OperationFunc{logical.ReadOperation: b.fpeResource, logical.UpdateOperation: b.fpeResource, logical.DeleteOperation: b.fpeResource}})
+		out = append(out, &framework.Path{Pattern: prefix + framework.GenericNameRegex("name"), Fields: fields, Callbacks: map[logical.Operation]framework.OperationFunc{logical.ReadOperation: b.transformationResource, logical.UpdateOperation: b.transformationResource, logical.DeleteOperation: b.transformationResource}})
 	}
-	for _, op := range []string{"encode", "decode"} {
-		out = append(out, &framework.Path{Pattern: op + "/" + framework.GenericNameRegex("role"), Fields: map[string]*framework.FieldSchema{"role": {Type: framework.TypeString}, "value": {Type: framework.TypeString}, "transformation": {Type: framework.TypeString}, "tweak": {Type: framework.TypeString}, "batch_input": {Type: framework.TypeSlice}, "reference": {Type: framework.TypeString}}, Callbacks: map[logical.Operation]framework.OperationFunc{logical.UpdateOperation: b.fpeOperation}})
+	for _, op := range []string{"encode", "decode", "validate", "metadata"} {
+		out = append(out, &framework.Path{Pattern: op + "/" + framework.GenericNameRegex("role"), Fields: map[string]*framework.FieldSchema{"role": {Type: framework.TypeString}, "value": {Type: framework.TypeString}, "transformation": {Type: framework.TypeString}, "tweak": {Type: framework.TypeString}, "batch_input": {Type: framework.TypeSlice}, "reference": {Type: framework.TypeString}, "ttl": {Type: framework.TypeDurationSecond}, "expiration": {Type: framework.TypeString}, "source_id": {Type: framework.TypeString}, "metadata": {Type: framework.TypeKVPairs}}, Callbacks: map[logical.Operation]framework.OperationFunc{logical.UpdateOperation: b.fpeOperation}})
 	}
 	return out
 }
@@ -107,10 +110,29 @@ func (b *transformBackend) fpeResource(ctx context.Context, req *logical.Request
 				}
 			}
 		}
+		if c.Type == "tokenization" {
+			var tokenConfig transformTokenConfig
+			if _, err := transformLoad(ctx, req.Storage, key, &tokenConfig); err != nil {
+				return nil, err
+			}
+			prefix := "tokenization/" + tokenConfig.ID + "/"
+			keys, err := req.Storage.List(ctx, prefix)
+			if err != nil {
+				return nil, err
+			}
+			for _, token := range keys {
+				if err := req.Storage.Delete(ctx, prefix+token); err != nil {
+					return nil, err
+				}
+			}
+		}
 		return nil, req.Storage.Delete(ctx, key)
 	}
 	if v, ok := d.GetOk("type"); ok && v.(string) != "fpe" {
 		return logical.ErrorResponse("only fpe transformations are supported"), nil
+	}
+	if c.Type != "fpe" {
+		return logical.ErrorResponse("transformation type cannot be changed"), nil
 	}
 	if _, ok := d.Raw["template"]; ok {
 		c.Template = d.Get("template").(string)
@@ -146,8 +168,8 @@ func (b *transformBackend) fpeResource(ctx context.Context, req *logical.Request
 	return nil, transformSave(ctx, req.Storage, key, c)
 }
 func (b *transformBackend) fpeOperation(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	role := d.Get("role").(string)
 	var r struct {
 		Transformations []string `json:"transformations"`
@@ -200,6 +222,18 @@ func (b *transformBackend) fpeOperation(ctx context.Context, req *logical.Reques
 		}
 		if len(value) > 65536 {
 			return nil, fmt.Errorf("value too long")
+		}
+		if c.Type == "tokenization" {
+			result, err := b.tokenizationRun(ctx, req, name, value, input)
+			if err == nil {
+				if ref, ok := input["reference"]; ok {
+					result["reference"] = ref
+				}
+			}
+			return result, err
+		}
+		if strings.HasPrefix(req.Path, "validate/") || strings.HasPrefix(req.Path, "metadata/") {
+			return nil, fmt.Errorf("operation requires tokenization")
 		}
 		tweak := c.Tweak
 		result := map[string]interface{}{}
