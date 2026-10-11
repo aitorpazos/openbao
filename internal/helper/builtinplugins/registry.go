@@ -12,6 +12,7 @@ import (
 	credCert "github.com/openbao/openbao/v2/internal/builtin/credential/cert"
 	credJWT "github.com/openbao/openbao/v2/internal/builtin/credential/jwt"
 	credKube "github.com/openbao/openbao/v2/internal/builtin/credential/kubernetes"
+	credLdap "github.com/openbao/openbao/v2/internal/builtin/credential/ldap"
 	credUserpass "github.com/openbao/openbao/v2/internal/builtin/credential/userpass"
 	dbCass "github.com/openbao/openbao/v2/internal/builtin/database/cassandra"
 	dbInflux "github.com/openbao/openbao/v2/internal/builtin/database/influxdb"
@@ -60,6 +61,7 @@ func newRegistry() *registry {
 			"cert":       {Factory: credCert.Factory},
 			"jwt":        {Factory: credJWT.Factory},
 			"kubernetes": {Factory: credKube.Factory},
+			"ldap":       {Factory: credLdap.Factory},
 			"oidc":       {Factory: credJWT.Factory},
 			"userpass":   {Factory: credUserpass.Factory},
 		},
@@ -80,6 +82,7 @@ func newRegistry() *registry {
 		logicalBackends: map[string]logicalBackend{
 			"kubernetes": {Factory: logicalKube.Factory},
 			"kv":         {Factory: logicalKv.Factory},
+			"ldap":       {Factory: credLdap.SecretsFactory},
 			"pki":        {Factory: logicalPki.Factory},
 			"rabbitmq":   {Factory: logicalRabbit.Factory},
 			"ssh":        {Factory: logicalSsh.Factory},
