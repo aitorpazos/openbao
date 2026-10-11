@@ -1232,7 +1232,7 @@ func TestNamespaceSealResourcesLifecycle(t *testing.T) {
 		// mounts
 		mounts, err := c.mounts.FindAllNamespaceMounts(nsCtx)
 		require.NoError(t, err)
-		require.Len(t, mounts, 4)
+		require.Len(t, mounts, 5)
 
 		// identity
 		counts, err := c.identityStore.CountEntitiesByNamespace(nsCtx)
@@ -1505,7 +1505,7 @@ func TestNamespaceSealManyLeases(t *testing.T) {
 			// mounts
 			mounts, err := c.mounts.FindAllNamespaceMounts(nsCtx)
 			require.NoError(t, err, "for namespace: %v", path)
-			require.Len(t, mounts, 4, "for namespace: %v", path)
+			require.Len(t, mounts, 5, "for namespace: %v", path)
 
 			// leases
 			require.EventuallyWithT(t, func(collect *assert.CollectT) {
@@ -1849,7 +1849,7 @@ func TestNamespaceManyLeases(t *testing.T) {
 			// mounts
 			mounts, err := c.mounts.FindAllNamespaceMounts(nsCtx)
 			require.NoError(t, err, "for namespace: %v", path)
-			require.Len(t, mounts, 4, "for namespace: %v", path)
+			require.Len(t, mounts, 5, "for namespace: %v", path)
 
 			// leases
 			require.EventuallyWithT(t, func(collect *assert.CollectT) {

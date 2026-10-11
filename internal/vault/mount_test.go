@@ -65,8 +65,8 @@ func TestLogicalMountMetrics(t *testing.T) {
 	loadMetric, ok := mountMetrics.Load(mountKeyName)
 	numEntriesMetric := loadMetric.(metricsutil.GaugeMetric)
 
-	// 3 default nonlocal logical backends
-	if !ok || numEntriesMetric.Value != 3 {
+	// 4 default nonlocal logical backends (secret, sys, identity, agent-registry)
+	if !ok || numEntriesMetric.Value != 4 {
 		t.Fatalf("Auth values should be: %+v", numEntriesMetric)
 	}
 	me := &routing.MountEntry{
@@ -81,7 +81,7 @@ func TestLogicalMountMetrics(t *testing.T) {
 	mountMetrics = &c.metricsHelper.LoopMetrics.Metrics
 	loadMetric, ok = mountMetrics.Load(mountKeyName)
 	numEntriesMetric = loadMetric.(metricsutil.GaugeMetric)
-	if !ok || numEntriesMetric.Value != 4 {
+	if !ok || numEntriesMetric.Value != 5 {
 		t.Fatal("mount metrics for num entries do not match true values")
 	}
 	if len(numEntriesMetric.Key) != 3 ||
@@ -121,7 +121,7 @@ func TestLogicalMountMetrics(t *testing.T) {
 
 func TestCore_DefaultMountTable(t *testing.T) {
 	c, keys, _ := TestCoreUnsealed(t)
-	verifyDefaultTable(t, c.mounts, 4)
+	verifyDefaultTable(t, c.mounts, 5)
 
 	// Start a second core with same physical
 	inmemSink := metrics.NewInmemSink(1000000*time.Hour, 2000000*time.Hour)
@@ -862,7 +862,7 @@ func TestCore_RemountMount_Namespaces(t *testing.T) {
 func TestDefaultMountTable(t *testing.T) {
 	c, _, _ := TestCoreUnsealed(t)
 	table := c.defaultMountTable(t.Context())
-	verifyDefaultTable(t, table, 3)
+	verifyDefaultTable(t, table, 4)
 }
 
 func TestCore_MountTable_UpgradeToTyped(t *testing.T) {
@@ -1138,6 +1138,10 @@ func verifyDefaultTable(t *testing.T, table *routing.MountTable, expected int) {
 			if entry.Type != "identity" {
 				t.Fatalf("bad: %v", entry)
 			}
+		case "agent-registry/":
+			if entry.Type != "agent-registry" {
+				t.Fatalf("bad: %v", entry)
+			}
 		}
 		if entry.Table != routing.MountTableType {
 			t.Fatalf("bad: %v", entry)
@@ -1156,14 +1160,15 @@ func TestSingletonMountTableFunc(t *testing.T) {
 
 	mounts, auth := c.singletonMountTables()
 
-	if len(mounts.Entries) != 2 {
-		t.Fatalf("length of mounts is wrong; expected 2, got %d", len(mounts.Entries))
+	if len(mounts.Entries) != 3 {
+		t.Fatalf("length of mounts is wrong; expected 3, got %d", len(mounts.Entries))
 	}
 
 	for _, entry := range mounts.Entries {
 		switch entry.Type {
 		case "system":
 		case "identity":
+		case "agent-registry":
 		default:
 			t.Fatalf("unknown type %s", entry.Type)
 		}
