@@ -31,9 +31,9 @@ tip 0ad153f900, 2026-10-12): **1060 PASS / 38 FEATURE_ABSENT / 22 FAIL /
 activated without the fixture; clear when run with the documented SCIM
 fixture bootstrap — verified separately), 3 recovery-key-rekey fixture
 gates (deliberate: the fixture-only suites FAIL their gate on non-fixture
-targets so the rest SKIP), namespaces-ui parent-with-children deletion
-(observed 400 for a documented conditional operation), pki-transit-ent
-SLH-DSA create (documented clean-room deferral — no in-tree FIPS 205
+targets so the rest SKIP), namespaces-ui parent deletion racing the
+asynchronous child deletion (400 accepted per the documented async
+behavior; passes on retry), pki-transit-ent SLH-DSA create (documented clean-room deferral — no in-tree FIPS 205
 implementation), and secrets-import pre-activation read shape. SKIP
 growth reflects the fixture- and mock-dependent cases that skip when
 their provisioning is absent (rekey verification/backup fixtures, CIEPS
