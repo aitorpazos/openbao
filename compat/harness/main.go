@@ -203,8 +203,11 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 			return "ERROR", status, "bad JSON: " + err.Error(), captured
 		}
 	}
+	// Expectation keys and values may embed captured slots (a response
+	// key that was minted by an earlier case, e.g. data.key_info.$id.*).
+	expect := substituteExpect(c.Expect, capturedData)
 	accepted := false
-	for _, want := range c.Expect.Status {
+	for _, want := range expect.Status {
 		if status == want {
 			accepted = true
 		}
@@ -215,7 +218,7 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		// here (e.g. standard servers reject API audit enable with 400 in
 		// favor of declarative config). SKIP — not FAIL — so the family
 		// reports honestly across differently-provisioned targets.
-		for _, skip := range c.Expect.SkipOnStatus {
+		for _, skip := range expect.SkipOnStatus {
 			if status == skip {
 				return "SKIP", status, fmt.Sprintf("skipped: HTTP %d matches skip_on_status", status), captured
 			}
@@ -232,25 +235,25 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		}
 		return "FAIL", status, detail, captured
 	}
-	if c.Expect.Body.Kind != 0 && len(b) != 0 {
+	if expect.Body.Kind != 0 && len(b) != 0 {
 		return "FAIL", status, "expected empty body", captured
 	}
-	if len(bytes.TrimSpace(b)) == 0 && (c.Expect.Schema != nil || len(c.Expect.Exact) > 0 || len(c.Expect.Contains) > 0 || len(c.Expect.Errors) > 0) {
+	if len(bytes.TrimSpace(b)) == 0 && (expect.Schema != nil || len(expect.Exact) > 0 || len(expect.Contains) > 0 || len(expect.Errors) > 0) {
 		return "FAIL", status, "empty body cannot satisfy JSON assertions", captured
 	}
-	if err = validate(c.Expect.Schema, body, "$"); err != nil {
+	if err = validate(expect.Schema, body, "$"); err != nil {
 		return "FAIL", status, err.Error(), captured
 	}
-	if err = matchExact(c.Expect.Exact, body); err != nil {
+	if err = matchExact(expect.Exact, body); err != nil {
 		return "FAIL", status, err.Error(), captured
 	}
-	if err = matchContains(c.Expect.Contains, body); err != nil {
+	if err = matchContains(expect.Contains, body); err != nil {
 		return "FAIL", status, err.Error(), captured
 	}
-	if err = matchAbsent(c.Expect.Absent, body); err != nil {
+	if err = matchAbsent(expect.Absent, body); err != nil {
 		return "FAIL", status, err.Error(), captured
 	}
-	if err = matchErrors(c.Expect.Errors, body); err != nil {
+	if err = matchErrors(expect.Errors, body); err != nil {
 		return "FAIL", status, err.Error(), captured
 	}
 	if c.CaptureToken {
@@ -552,6 +555,94 @@ func substituteCaptured(v any, capturedData map[string]string) (any, error) {
 		return v, nil
 	}
 }
+
+// substituteExpect applies capture substitution to the Expect section:
+// map KEYS (dotted paths may embed $slot, e.g. data.key_info.$id.title)
+// and string values across exact/contains/schema/absent. Unlike the
+// request-body substituteCaptured, unknown $names pass through literally
+// (expectation keys legitimately contain $-prefixed fields in schemas).
+func substituteExpect(e Expect, capturedData map[string]string) Expect {
+	subKey := func(k string) string {
+		// Dotted expectation keys may embed a $slot segment
+		// (data.key_info.$id.title); substitute per segment.
+		if !strings.Contains(k, "$") {
+			return k
+		}
+		parts := strings.Split(k, ".")
+		for i, part := range parts {
+			if name, ok := strings.CutPrefix(part, "$"); ok && nameRegexp.MatchString(name) {
+				if val, ok := capturedData[name]; ok {
+					parts[i] = val
+				}
+			}
+		}
+		return strings.Join(parts, ".")
+	}
+	subMap := func(m map[string]any) map[string]any {
+		if m == nil {
+			return nil
+		}
+		out := make(map[string]any, len(m))
+		for k, val := range m {
+			subVal, err := substituteCaptured(val, capturedData)
+			if err != nil {
+				subVal = val
+			}
+			out[subKey(k)] = subVal
+		}
+		return out
+	}
+	subSchema := func(m map[string]any) map[string]any {
+		if m == nil {
+			return nil
+		}
+		out := make(map[string]any, len(m))
+		for k, val := range m {
+			out[subKey(k)] = subSchemaValue(val, capturedData, subKey)
+		}
+		return out
+	}
+	subAbsent := make([]string, len(e.Absent))
+	for i, k := range e.Absent {
+		subAbsent[i] = subKey(k)
+	}
+	return Expect{
+		Status:       e.Status,
+		Schema:       subSchema(e.Schema),
+		Exact:        subMap(e.Exact),
+		Contains:     subMap(e.Contains),
+		Absent:       subAbsent,
+		SkipOnStatus: e.SkipOnStatus,
+		Errors:       e.Errors,
+		Body:         e.Body,
+	}
+}
+
+// subSchemaValue substitutes $-capture property names and string values in
+// a JSON-schema fragment so a schema can address a captured map key.
+func subSchemaValue(v any, capturedData map[string]string, subKey func(string) string) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[subKey(k)] = subSchemaValue(val, capturedData, subKey)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = subSchemaValue(val, capturedData, subKey)
+		}
+		return out
+	default:
+		sub, err := substituteCaptured(v, capturedData)
+		if err != nil {
+			return v
+		}
+		return sub
+	}
+}
+
 func exitCode(results []Result, strict bool) int {
 	for _, r := range results {
 		if r.Verdict == "FAIL" || r.Verdict == "ERROR" || (strict && r.Verdict == "FEATURE_ABSENT") {

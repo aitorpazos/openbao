@@ -1,0 +1,343 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-internal-ui-delivery
+feature: enterprise-config
+source: https://developer.hashicorp.com/vault/api-docs/system/internal-ui-authenticated-messages
+source_version: "v2.x (latest)"
+notes: |
+  Sources: internal-ui-authenticated-messages, internal-ui-unauthenticated-messages
+  and internal-ui-default-auth-methods API pages (v2.x latest, Enterprise-gated;
+  "no guarantee on backwards compatibility ... used internally by the UI").
+  Contract points verified here: GET lists ACTIVE messages of the requested
+  audience (authenticated flag), the response key_info carries the full message
+  shape with the base64-decoded plain-text message body (the config API stores
+  base64; the documented delivery sample shows plain text), end_time/options
+  null when unset, and namespace aggregation from the current namespace up to
+  and including the root namespace (verified through a child namespace seeing
+  a root-namespace message). default-auth-methods is an "Unrestricted
+  endpoint"; it returns the explicit or inherited default/backup auth types
+  for the request namespace, with disable_inheritance=true configurations
+  applying only to their own namespace (documented: "Setting
+  disable_inheritance to true disallows inheritance" by child namespaces).
+  Resolution with no configuration returns the UI built-in default (the
+  token method, no backups). The delivery sample uses UUID ids because the
+  sample creates without an ID; here ids come from the config API.
+cases:
+  - id: delivery-cleanup-preexisting-messages
+    note: |
+      An earlier run may have left compat messages or login rules; remove
+      them so the delivery assertions see only this run's artifacts. Actions
+      run on a fresh server too, where everything is already absent (204/404
+      both accepted). The LIST here is informational - it 404s on an empty
+      collection (the API-wide empty-list convention).
+    request:
+      method: LIST
+      path: /v1/sys/config/ui/custom-messages
+    expect:
+      status: [200, 404]
+      body_schema:
+        type: object
+        properties:
+          data:
+            type: object
+            properties:
+              keys: {type: array, items: {type: string}}
+    actions:
+      - request:
+          method: DELETE
+          path: /v1/sys/config/ui/custom-messages/compat-ui-pre
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/config/ui/custom-messages/compat-ui-unauth
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/config/ui/login/default-auth/compat-ui-root-rule
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/config/ui/login/default-auth/compat-ui-parent-rule
+        expect: {status: [200, 204, 404]}
+
+  - id: delivery-cleanup-preexisting-namespaces
+    note: |
+      Namespace deletion is asynchronous on the fork; a preceding run's
+      deletions may still be in flight, so sleep before creating.
+    sleep_ms: 3000
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/compat-ui-grandchild
+      headers:
+        X-Vault-Namespace: compat-ui-parent/
+    expect: {status: [200, 204, 404]}
+    actions:
+      - request:
+          method: DELETE
+          path: /v1/sys/namespaces/compat-ui-parent
+        expect: {status: [200, 204, 400, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/namespaces/compat-ui-child
+        expect: {status: [200, 204, 400, 404]}
+
+  - id: delivery-create-authenticated-banner
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages/compat-ui-pre
+      body:
+        title: Post-login Advisory
+        message: Y29tcGF0LXVpLWRlbGl2ZXJ5
+        start_time: "2024-01-01T00:00:00Z"
+    expect:
+      status: 200
+      exact:
+        data.type: banner
+        data.authenticated: true
+    capture:
+      msg-id: data.id
+
+  - id: delivery-create-unauthenticated-banner
+    request:
+      method: POST
+      path: /v1/sys/config/ui/custom-messages/compat-ui-unauth
+      body:
+        title: Pre-login Warning
+        message: cHJlLWxvZ2luLXdhcm5pbmc=
+        start_time: "2024-01-01T00:00:00Z"
+        authenticated: false
+    expect:
+      status: 200
+      exact:
+        data.type: banner
+        data.authenticated: false
+    capture:
+      unauth-id: data.id
+
+  - id: delivery-authenticated-messages
+    note: active authenticated messages are listed with the full message
+      shape and the base64-decoded plain-text message body.
+    depends: [delivery-create-authenticated-banner, delivery-create-unauthenticated-banner]
+    request: {method: GET, path: /v1/sys/internal/ui/authenticated-messages}
+    expect:
+      status: 200
+      exact:
+        data.key_info.$msg-id.title: Post-login Advisory
+        data.key_info.$msg-id.message: compat-ui-delivery
+        data.key_info.$msg-id.type: banner
+        data.key_info.$msg-id.authenticated: true
+        data.key_info.$msg-id.end_time: null
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys, key_info]
+            properties:
+              keys: {type: array, items: {type: string}}
+              key_info:
+                type: object
+                properties:
+                  $msg-id:
+                    type: object
+                    required: [title, message, type, authenticated, start_time, end_time, options, link]
+                    properties:
+                      title: {type: string}
+                      message: {type: string}
+                      type: {type: string}
+                      authenticated: {type: boolean}
+                      start_time: {type: string}
+                      end_time: {type: 'null'}
+                      options: {type: 'null'}
+                      link: {type: 'null'}
+
+  - id: delivery-authenticated-excludes-unauth
+    depends: [delivery-authenticated-messages]
+    request: {method: GET, path: /v1/sys/internal/ui/authenticated-messages}
+    expect:
+      status: 200
+      absent:
+        - data.key_info.$unauth-id
+
+  - id: delivery-unauthenticated-messages-no-auth
+    note: the pre-login delivery view is reachable without a token (its
+      purpose is the login page).
+    request: {method: GET, path: /v1/sys/internal/ui/unauthenticated-messages}
+    no_auth: true
+    expect:
+      status: 200
+      exact:
+        data.key_info.$unauth-id.title: Pre-login Warning
+        data.key_info.$unauth-id.message: pre-login-warning
+        data.key_info.$unauth-id.authenticated: false
+      absent:
+        - data.key_info.$msg-id
+
+  - id: delivery-unauthenticated-messages-with-token
+    request: {method: GET, path: /v1/sys/internal/ui/unauthenticated-messages}
+    expect:
+      status: 200
+      exact:
+        data.key_info.$unauth-id.message: pre-login-warning
+
+  - id: delivery-default-auth-unrestricted-no-config
+    note: documented "Unrestricted endpoint" — no token required. With no
+      configuration anywhere the UI built-in default (token) is returned.
+    request: {method: GET, path: /v1/sys/internal/ui/default-auth-methods}
+    no_auth: true
+    expect:
+      status: 200
+      exact:
+        data.default_auth_type: token
+        data.backup_auth_types: []
+        data.disable_inheritance: false
+
+  - id: delivery-create-namespace-child
+    request:
+      method: POST
+      path: /v1/sys/namespaces/compat-ui-child
+    expect:
+      status: 200
+
+  - id: delivery-create-namespace-parent
+    request:
+      method: POST
+      path: /v1/sys/namespaces/compat-ui-parent
+    expect:
+      status: 200
+
+  - id: delivery-create-namespace-grandchild
+    note: multi-segment namespace paths are created via the parent header
+      context (the fork rejects a/b directly on /sys/namespaces — see the
+      sys-namespaces-nested family note).
+    depends: [delivery-create-namespace-parent]
+    request:
+      method: POST
+      path: /v1/sys/namespaces/compat-ui-grandchild
+      headers:
+        X-Vault-Namespace: compat-ui-parent/
+    expect:
+      status: 200
+
+  - id: delivery-default-auth-explicit-root
+    note: the root configuration is explicit for the root namespace.
+    depends: [delivery-cleanup-preexisting-messages]
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ui-root-rule
+      body: {namespace_path: root, default_auth_type: userpass, backup_auth_types: [token]}
+    expect:
+      status: [200, 204]
+
+  - id: delivery-default-auth-resolves-root
+    depends: [delivery-default-auth-explicit-root]
+    request: {method: GET, path: /v1/sys/internal/ui/default-auth-methods}
+    expect:
+      status: 200
+      exact:
+        data.default_auth_type: userpass
+        data.backup_auth_types: [token]
+        data.disable_inheritance: false
+
+  - id: delivery-default-auth-child-inherits-root
+    note: a namespace without its own configuration inherits the nearest
+      ancestor's configuration (the root one here).
+    depends: [delivery-default-auth-resolves-root, delivery-create-namespace-child]
+    request:
+      method: GET
+      path: /v1/sys/internal/ui/default-auth-methods
+      headers: {X-Vault-Namespace: compat-ui-child}
+    expect:
+      status: 200
+      exact:
+        data.default_auth_type: userpass
+        data.backup_auth_types: [token]
+
+  - id: delivery-default-auth-parent-explicit
+    note: a child configuration resolves as explicit for its own namespace.
+    depends: [delivery-default-auth-child-inherits-root, delivery-create-namespace-parent]
+    request:
+      method: POST
+      path: /v1/sys/config/ui/login/default-auth/compat-ui-parent-rule
+      body: {namespace_path: compat-ui-parent, default_auth_type: okta, disable_inheritance: true}
+    expect:
+      status: [200, 204]
+
+  - id: delivery-default-auth-parent-explicit-resolves
+    depends: [delivery-default-auth-parent-explicit]
+    request:
+      method: GET
+      path: /v1/sys/internal/ui/default-auth-methods
+      headers: {X-Vault-Namespace: compat-ui-parent}
+    expect:
+      status: 200
+      exact:
+        data.default_auth_type: okta
+        data.disable_inheritance: true
+
+  - id: delivery-default-auth-grandchild-skips-disabled
+    note: disable_inheritance=true means child namespaces do NOT inherit the
+      configuration; the grandchild falls back past it to the root one.
+    depends: [delivery-default-auth-parent-explicit-resolves, delivery-create-namespace-grandchild]
+    request:
+      method: GET
+      path: /v1/sys/internal/ui/default-auth-methods
+      headers: {X-Vault-Namespace: compat-ui-parent/compat-ui-grandchild}
+    expect:
+      status: 200
+      exact:
+        data.default_auth_type: userpass
+        data.backup_auth_types: [token]
+
+  - id: delivery-namespace-ancestral-messages
+    note: delivery aggregates messages from the current namespace up to and
+      including the root namespace — a root-namespace message is visible
+      from a child namespace.
+    depends: [delivery-default-auth-grandchild-skips-disabled]
+    request:
+      method: GET
+      path: /v1/sys/internal/ui/authenticated-messages
+      headers: {X-Vault-Namespace: compat-ui-child}
+    expect:
+      status: 200
+      exact:
+        data.key_info.$msg-id.message: compat-ui-delivery
+
+  - id: delivery-cleanup-login-configs
+    sleep_ms: 3000
+    actions:
+      - request:
+          method: DELETE
+          path: /v1/sys/config/ui/login/default-auth/compat-ui-root-rule
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/namespaces/compat-ui-grandchild
+          headers:
+            X-Vault-Namespace: compat-ui-parent/
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/namespaces/compat-ui-parent
+        expect: {status: [200, 204, 400, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/namespaces/compat-ui-child
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/config/ui/custom-messages/compat-ui-pre
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: DELETE
+          path: /v1/sys/config/ui/custom-messages/compat-ui-unauth
+        expect: {status: [200, 204, 404]}
+
+  - id: delivery-default-auth-after-cleanup
+    depends: [delivery-cleanup-login-configs]
+    request: {method: GET, path: /v1/sys/internal/ui/default-auth-methods}
+    expect:
+      status: 200
+      exact:
+        data.default_auth_type: token
+        data.backup_auth_types: []

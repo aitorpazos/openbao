@@ -190,7 +190,7 @@ func handleUICustomMessage(ctx context.Context, r *logical.Request, d *framework
 		if err != nil {
 			return nil, err
 		}
-		if entry == nil {
+		if entry == nil && r.Operation != logical.UpdateOperation {
 			return nil, nil
 		}
 		if r.Operation == logical.ReadOperation {

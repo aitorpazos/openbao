@@ -120,7 +120,7 @@ type Expect struct {
 	// enable on standard servers that require declarative config). When
 	// the response status matches, the case SKIPs with that detail
 	// instead of FAILing; dependent cases skip transitively.
-	SkipOnStatus []int `yaml:"skip_on_status"`
+	SkipOnStatus []int     `yaml:"skip_on_status"`
 	Errors       []string  `yaml:"errors_contain"`
 	Body         yaml.Node `yaml:"body"`
 }

@@ -98,6 +98,9 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 				"internal/ui/mounts",
 				"internal/ui/mounts/*",
 				"internal/ui/namespaces",
+				"internal/ui/authenticated-messages",
+				"internal/ui/unauthenticated-messages",
+				"internal/ui/default-auth-methods",
 				"storage/raft/bootstrap/challenge",
 				"storage/raft/bootstrap/answer",
 				"init",
@@ -138,6 +141,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	b.Paths = append(b.Paths, b.managedKeyPaths()...)
 	b.Paths = append(b.Paths, b.controlGroupConfigPaths()...)
 	b.Paths = append(b.Paths, b.enterpriseConfigPaths()...)
+	b.Paths = append(b.Paths, b.internalUIPaths()...)
 	b.Paths = append(b.Paths, b.oauthResourceServerPaths()...)
 	b.Paths = append(b.Paths, b.activationFlagPaths()...)
 	b.Paths = append(b.Paths, b.rekeyPaths()...)

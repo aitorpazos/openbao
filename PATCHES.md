@@ -566,3 +566,59 @@ Deviations/limits (documented in the spec family notes):
 - The recovery view is bounded to the currently loaded snapshot (the
   documented 72h auto-unload and single-snapshot load rules come from the
   existing load service).
+
+## Internal UI delivery views: custom messages + default login auth (2026-10-12)
+
+Public docs (developer.hashicorp.com, v2.x latest):
+- `GET /sys/internal/ui/authenticated-messages` and
+  `.../unauthenticated-messages` (Enterprise-gated feature docs, EE 1.16.0+
+  for creation): list the messages a UI client shows after/before login.
+  Envelope: `data.keys` (uuid array) + `data.key_info` (map keyed by uuid →
+  title/message/type/authenticated/start_time RFC3339Nano/end_time (null
+  allowed)/options/link). Namespace semantics: messages active in the
+  request namespace plus all ancestral namespaces up to root.
+- `GET|LIST /sys/internal/ui/default-auth-methods` (unrestricted, no auth):
+  returns `data.{default_auth_type, backup_auth_types,
+  disable_inheritance}` for the `X-Vault-Namespace`-derived namespace,
+  inheriting from ancestors when unset; `disable_inheritance` on an ancestor
+  stops the inheritance walk at that ancestor.
+
+Implementation (new files only; wire-in appends existing path groups):
+- `internal/vault/logical_system_internal_ui.go` (new): three delivery
+  endpoints backed by the existing config CRUD structs
+  (`uiCustomMessage`, `uiDefaultAuth` in
+  `logical_system_enterprise_config.go`):
+  - active-window filtering (`active` computed from start/end time; entries
+    with a non-null end_time in the past or a future start_time are not
+    delivered),
+  - authenticated vs unauthenticated split driven by the message's own
+    `authenticated` flag, independent of the request's auth state,
+  - namespace ancestry: the request namespace is resolved via
+    `c.NamespaceStore.GetNamespaceByPath`, then ancestor views are walked
+    root-ward with `NamespaceScopedView` (nearest config wins for default
+    auth; all ancestors' messages are delivered; `disable_inheritance` on
+    an ancestor stops the default-auth inheritance walk at that ancestor),
+  - GET returns the resolved shape; LIST is registered for the endpoint
+    surface (returns the same data).
+- `internal/vault/logical_system.go`: appended `b.internalUIPaths()` and
+  added the three paths to `PathsSpecial.Unauthenticated` (default-auth is
+  documented as reachable without auth; the message endpoints are also
+  unauthenticated in the fork — delivery-before-login requires it).
+- `internal/vault/logical_system_enterprise_config.go`: POST on a named
+  custom-message id that does not exist yet now creates it (upsert),
+  matching the documented route table (`POST /sys/config/ui/custom-messages/:id`).
+
+Spec `compat/specs/enterprise-config/03-ui-delivery.yaml` — 21 cases
+covering: pre-existing cleanup, create authenticated + unauthenticated
+messages, delivery split with/without token, active-window filtering
+(future start / past end not delivered), create-batch (LIST collection),
+default-auth CRUD, unrestricted access (no token), root resolution, child
+inherits root, explicit parent config wins, grandchild skips a
+disabled-inheritance parent, namespace ancestral messages visible from
+child/grandchild contexts, final cleanup. 54/54 PASS on dev and on the raft
+server, idempotent across reruns (async namespace deletion tolerated with
+400 + sleep_ms waits).
+
+Harness: Expect-section capture substitution (`substituteExpect`) for
+exact/contains/schema/absent values, including dotted keys with embedded
+`$slot` segments (per-segment substitution in `subKey`).
