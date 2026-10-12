@@ -5,6 +5,7 @@ package vault
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -55,7 +56,13 @@ func TestAutopilotDisableUpgradeMigrationConfiguration(t *testing.T) {
 		t.Helper()
 		resp, err := b.handleStorageRaftAutopilotConfigRead()(ctx, &logical.Request{}, nil)
 		require.NoError(t, err)
-		require.Equal(t, want, resp.Data["disable_upgrade_migration"])
+		// The documented response places the configuration fields at the top
+		// level of the HTTP body via the raw-body keys.
+		raw, ok := resp.Data[logical.HTTPRawBody].([]byte)
+		require.True(t, ok)
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(raw, &fields))
+		require.Equal(t, want, fields["disable_upgrade_migration"])
 	}
 	read(false)
 	for _, value := range []bool{true, false} {

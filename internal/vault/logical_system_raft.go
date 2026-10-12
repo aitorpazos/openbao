@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -551,15 +552,27 @@ func (b *SystemBackend) handleStorageRaftAutopilotConfigRead() framework.Operati
 			return nil, err
 		}
 
+		// The documented sample response places the configuration fields at
+		// the top level of the HTTP body, outside the usual data envelope,
+		// so the read handler emits a raw JSON object via the
+		// HTTPRawBody/HTTPContentType data keys.
+		raw, err := json.Marshal(map[string]any{
+			"cleanup_dead_servers":               config.CleanupDeadServers,
+			"last_contact_threshold":             config.LastContactThreshold.String(),
+			"dead_server_last_contact_threshold": config.DeadServerLastContactThreshold.String(),
+			"max_trailing_logs":                  config.MaxTrailingLogs,
+			"min_quorum":                         config.MinQuorum,
+			"server_stabilization_time":          config.ServerStabilizationTime.String(),
+			"disable_upgrade_migration":          stored.DisableUpgradeMigration,
+		})
+		if err != nil {
+			return nil, err
+		}
 		return &logical.Response{
 			Data: map[string]any{
-				"cleanup_dead_servers":               config.CleanupDeadServers,
-				"last_contact_threshold":             config.LastContactThreshold.String(),
-				"dead_server_last_contact_threshold": config.DeadServerLastContactThreshold.String(),
-				"max_trailing_logs":                  config.MaxTrailingLogs,
-				"min_quorum":                         config.MinQuorum,
-				"server_stabilization_time":          config.ServerStabilizationTime.String(),
-				"disable_upgrade_migration":          stored.DisableUpgradeMigration,
+				logical.HTTPStatusCode:  200,
+				logical.HTTPRawBody:     raw,
+				logical.HTTPContentType: "application/json",
 			},
 		}, nil
 	}

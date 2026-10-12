@@ -120,4 +120,9 @@ cases:
       method: DELETE
       path: /v1/sys/rekey-recovery-key/init
       body: {nonce: $rknonce}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204, 400]}
+    note: >-
+      200/204 on a supporting seal (active or idle cancel, both idempotent).
+      On seals without recovery-key support the documented gating responds
+      400 "recovery rekeying not supported" for every recovery-rekey verb,
+      which this housekeeping case accepts rather than failing.

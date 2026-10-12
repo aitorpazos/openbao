@@ -25,8 +25,8 @@ Also added: specs for the DR operation-token ceremony route/schema surface
 (implementation belongs to the replication agent's lane; 9 cases remain
 FEATURE_ABSENT pending those routes).
 
-Live full-suite state on an in-memory dev server (compat-harness, latest
-branch tip): **966 PASS / 39 FEATURE_ABSENT / 25 FAIL / 27 SKIP**. The FAILs
+Live full-suite state on a fresh in-memory dev server (compat-harness, latest
+branch tip): **1042 PASS / 38 FEATURE_ABSENT / 24 FAIL / 27 SKIP**. The FAILs
 decompose as: 16 SCIM fixture-contract cases (clear when run with the
 documented SCIM-actor token — verified 20/20; the suite's shared token cannot
 be the registered actor), 3 audit cases requiring the
@@ -34,10 +34,20 @@ be the registered actor), 3 audit cases requiring the
 gates (deliberate: the fixture-only suites FAIL their gate on non-fixture
 targets so the rest SKIP), 1 documented asynchronous namespace-deletion
 fixture race (direct retry succeeds), and SLH-DSA create — a documented
-clean-room deferral, not a spec error. FEATURE_ABSENT decomposes as:
-raft-integrated-storage prerequisites (autosnapshot 16, snapshot-load 5,
-autopilot config 6, redundancy state 1), the 9 DR operation-token routes,
-and 2 rekey-recovery-key probes on the non-recovery-sealed dev target.
+clean-room deferral, not a spec error. FEATURE_ABSENT on the inmem dev
+target decomposes as: 28 raft-only routes (storage precondition, see below),
+the 9 DR operation-token routes, and 1 mfa-stepup-requirements route.
+Two more state notes: `sys-activation-flags-secrets-import` read-pre-activation
+requires a fresh server (the activation flag is one-time), and the
+namespace-deletion UI race self-heals on retry.
+
+**Raft-integrated-storage fixture:** 36 additional cases are live-verified
+against a disposable raft-storage server (raft-autosnapshot 19,
+snapshot-load 5, snapshot autoload 4, autopilot configuration 6, redundancy
+state 2 — all PASS). On the inmem dev target these routes are
+FEATURE_ABSENT by storage precondition, not by absence of code. Raft-only
+route registration under `raftStoragePaths()` means the inmem FA verdicts
+are environmental.
 
 Remaining documented-deferral families (Medium priority per the census):
 KMIP listener/CA/client fixtures, performance-standby/consistency
