@@ -1113,6 +1113,15 @@ func TestKeyType_CapabilitiesAndString(t *testing.T) {
 			wantKeyAgree: false, wantAssoc: false, wantImp: true,
 			wantStr: "mldsa-87",
 		},
+		// --- SLH-DSA ---
+		{
+			kt:      KeyType_SLHDSA,
+			wantEnc: false, wantDec: false,
+			wantSign:    true,
+			wantHashSig: false, wantDeriv: false,
+			wantKeyAgree: false, wantAssoc: false, wantImp: false,
+			wantStr: "slh-dsa",
+		},
 		// --- HMAC ---
 		{
 			kt:      KeyType_HMAC,

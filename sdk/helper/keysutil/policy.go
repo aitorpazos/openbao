@@ -34,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cloudflare/circl/sign/slhdsa"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/hkdf"
@@ -82,6 +83,7 @@ const (
 	KeyType_AES128_CBC
 	KeyType_AES256_CBC
 	KeyType_Hybrid
+	KeyType_SLHDSA
 
 	// External keys is a meta-type.
 	KeyType_ExternalKey = 10000
@@ -167,7 +169,7 @@ func (kt KeyType) DecryptionSupported() bool {
 }
 
 func (kt KeyType) SigningSupported() bool {
-	if kt == KeyType_Hybrid {
+	if kt == KeyType_Hybrid || kt == KeyType_SLHDSA {
 		return true
 	}
 	switch kt {
@@ -297,6 +299,8 @@ func (kt KeyType) String() string {
 		return "mldsa-65"
 	case KeyType_MLDSA87:
 		return "mldsa-87"
+	case KeyType_SLHDSA:
+		return "slh-dsa"
 	case KeyType_ExternalKey:
 		return "external-key"
 	}
@@ -315,6 +319,42 @@ func (kt KeyType) MLDSAParams() mldsa.Parameters {
 	default:
 		panic("keysutil: MLDSAParams called on bad key type")
 	}
+}
+
+// DocumentedSLHDSAParameterSets maps the documented SLH-DSA parameter-set
+// names (as spelled on the transit API docs page) to the circl FIPS 205
+// parameter-set identifiers. The documented list contains one apparent
+// spelling inconsistency: "slh-dsa-shake-128" appears at the position of the
+// SHAKE-128f parameter set (between sha2-128f and sha2-192s). The documented
+// string is accepted as spelled and resolved to the SHAKE-128f parameters;
+// the consistent spelling "slh-dsa-shake-128f" is not on the documented list
+// and is therefore not accepted.
+var DocumentedSLHDSAParameterSets = map[string]slhdsa.ID{
+	"slh-dsa-sha2-128s":  slhdsa.SHA2_128s,
+	"slh-dsa-shake-128s": slhdsa.SHAKE_128s,
+	"slh-dsa-sha2-128f":  slhdsa.SHA2_128f,
+	"slh-dsa-shake-128":  slhdsa.SHAKE_128f,
+	"slh-dsa-sha2-192s":  slhdsa.SHA2_192s,
+	"slh-dsa-shake-192s": slhdsa.SHAKE_192s,
+	"slh-dsa-sha2-192f":  slhdsa.SHA2_192f,
+	"slh-dsa-shake-192f": slhdsa.SHAKE_192f,
+	"slh-dsa-sha2-256s":  slhdsa.SHA2_256s,
+	"slh-dsa-shake-256s": slhdsa.SHAKE_256s,
+	"slh-dsa-sha2-256f":  slhdsa.SHA2_256f,
+	"slh-dsa-shake-256f": slhdsa.SHAKE_256f,
+}
+
+// SLHDSAID resolves the policy's stored parameter_set string to the
+// corresponding FIPS 205 parameter-set identifier.
+func (p *Policy) SLHDSAID() (slhdsa.ID, error) {
+	if p.Type != KeyType_SLHDSA {
+		return 0, fmt.Errorf("keysutil: SLHDSAID called on %s policy", p.Type)
+	}
+	id, ok := DocumentedSLHDSAParameterSets[p.ParameterSet]
+	if !ok {
+		return 0, fmt.Errorf("invalid SLH-DSA parameter set %q", p.ParameterSet)
+	}
+	return id, nil
 }
 
 type KeyData struct {
@@ -346,6 +386,12 @@ type KeyEntry struct {
 	// the (potentially lazy) memoized result of that expansion so it can be
 	// shared across calls when caching is enabled.
 	MLDSAKey func() (*mldsa.PrivateKey, error) `json:"-"`
+
+	// SLH-DSA private keys serialize to a small binary blob (2n seed bytes
+	// plus the 2n public seed/root), stored in Key. This returns the
+	// (potentially lazy) memoized parsed private key so it can be shared
+	// across calls when caching is enabled.
+	SLHDSAKey func() (*slhdsa.PrivateKey, error) `json:"-"`
 
 	// The public key in an appropriate format for the type of key
 	FormattedPublicKey string `json:"public_key"`
@@ -465,6 +511,25 @@ func LoadPolicy(ctx context.Context, s logical.Storage, path string) (*Policy, e
 			if len(entry.Key) > 0 {
 				entry.MLDSAKey = sync.OnceValues(func() (*mldsa.PrivateKey, error) {
 					return mldsa.NewPrivateKey(policy.Type.MLDSAParams(), entry.Key)
+				})
+				// Ensure we write back to the map; entry is a copy.
+				policy.Keys[version] = entry
+			}
+		}
+	// Set SLH-DSA private keys up to lazily parse their serialized form.
+	case KeyType_SLHDSA:
+		for version, entry := range policy.Keys {
+			if len(entry.Key) > 0 {
+				id, err := policy.SLHDSAID()
+				if err != nil {
+					return nil, err
+				}
+				entry.SLHDSAKey = sync.OnceValues(func() (*slhdsa.PrivateKey, error) {
+					priv := slhdsa.PrivateKey{ID: id}
+					if err := priv.UnmarshalBinary(entry.Key); err != nil {
+						return nil, err
+					}
+					return &priv, nil
 				})
 				// Ensure we write back to the map; entry is a copy.
 				policy.Keys[version] = entry
@@ -1516,6 +1581,19 @@ func (p *Policy) SignWithOptions(ver int, derivationContext, input []byte, optio
 			return nil, err
 		}
 
+	case KeyType_SLHDSA:
+		// FIPS 205 signs the message directly; no prehash or external hash
+		// applies, mirroring the Ed25519 handling above.
+		key, err := keyParams.SLHDSAKey()
+		if err != nil {
+			return nil, err
+		}
+
+		sig, err = slhdsa.SignRandomized(key, rand.Reader, slhdsa.NewMessage(input), nil)
+		if err != nil {
+			return nil, err
+		}
+
 	case KeyType_ExternalKey:
 		if options.ExternalKeyFactory == nil {
 			return nil, fmt.Errorf("external key not found or no factory provided to request it")
@@ -1773,6 +1851,25 @@ func (p *Policy) VerifySignatureWithOptions(derivationContext, input []byte, sig
 			return false, err
 		}
 		return mldsa.Verify(pub, input, sigBytes, nil) == nil, nil
+
+	case KeyType_SLHDSA:
+		keyEntry, err := p.safeGetKeyEntry(ver)
+		if err != nil {
+			return false, err
+		}
+		encoding, err := base64.StdEncoding.DecodeString(keyEntry.FormattedPublicKey)
+		if err != nil {
+			return false, err
+		}
+		id, err := p.SLHDSAID()
+		if err != nil {
+			return false, err
+		}
+		pub := slhdsa.PublicKey{ID: id}
+		if err := pub.UnmarshalBinary(encoding); err != nil {
+			return false, err
+		}
+		return slhdsa.Verify(&pub, slhdsa.NewMessage(input), sigBytes, nil), nil
 
 	case KeyType_ExternalKey:
 		if options.ExternalKeyFactory == nil {
@@ -2120,6 +2217,30 @@ func (p *Policy) RotateInMemory(randReader io.Reader) (retErr error) {
 		entry.Key = key.Bytes()
 		entry.MLDSAKey = func() (*mldsa.PrivateKey, error) { return key, nil }
 		entry.FormattedPublicKey = base64.StdEncoding.EncodeToString(key.PublicKey().Bytes())
+
+	case KeyType_SLHDSA:
+		id, err := p.SLHDSAID()
+		if err != nil {
+			return err
+		}
+		pub, priv, err := slhdsa.GenerateKey(randReader, id)
+		if err != nil {
+			return err
+		}
+		privBytes, err := priv.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		pubBytes, err := pub.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		entry.Key = privBytes
+		entry.SLHDSAKey = func() (*slhdsa.PrivateKey, error) {
+			parsed := priv
+			return &parsed, nil
+		}
+		entry.FormattedPublicKey = base64.StdEncoding.EncodeToString(pubBytes)
 	}
 
 	if p.ConvergentEncryption {
@@ -2999,6 +3120,8 @@ func (p *Policy) getPrivateKey(keyEntry *KeyEntry) (crypto.Signer, error) {
 		return keyEntry.RSAKey, nil
 	case KeyType_MLDSA44, KeyType_MLDSA65, KeyType_MLDSA87:
 		return keyEntry.MLDSAKey()
+	case KeyType_SLHDSA:
+		return keyEntry.SLHDSAKey()
 	default:
 		return nil, errutil.InternalError{Err: fmt.Sprintf("selected key type '%s' does not support signing", p.Type.String())}
 	}

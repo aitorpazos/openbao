@@ -80,7 +80,7 @@ asymmetric) are supported. Defaults to "aes256-gcm96".
 `,
 			},
 
-			"parameter_set":       {Type: framework.TypeString, Description: "ML-DSA parameter set: 44, 65 or 87."},
+			"parameter_set":       {Type: framework.TypeString, Description: "ML-DSA parameter set: 44, 65 or 87. SLH-DSA parameter set, for example slh-dsa-sha2-128s."},
 			"hybrid_key_type_pqc": {Type: framework.TypeString, Description: "Hybrid post-quantum algorithm."},
 			"hybrid_key_type_ec":  {Type: framework.TypeString, Description: "Hybrid classical algorithm."},
 			"derived": {
@@ -313,6 +313,13 @@ func (b *backend) pathPolicyWrite(ctx context.Context, req *logical.Request, d *
 			}
 			polReq.KeyType = keysutil.KeyType_Hybrid
 		}
+	case "slh-dsa":
+		polReq.APIType = keyType
+		polReq.ParameterSet = d.Get("parameter_set").(string)
+		if _, ok := keysutil.DocumentedSLHDSAParameterSets[polReq.ParameterSet]; !ok {
+			return logical.ErrorResponse("parameter_set must be one of the documented SLH-DSA parameter sets"), logical.ErrInvalidRequest
+		}
+		polReq.KeyType = keysutil.KeyType_SLHDSA
 	case "aes128-gcm96":
 		polReq.KeyType = keysutil.KeyType_AES128_GCM96
 	case "aes256-gcm96":
@@ -507,7 +514,8 @@ func (b *backend) formatKeyPolicy(p *keysutil.Policy, context []byte) (*logical.
 
 	case keysutil.KeyType_ECDSA_P256, keysutil.KeyType_ECDSA_P384, keysutil.KeyType_ECDSA_P521, keysutil.KeyType_ED25519,
 		keysutil.KeyType_RSA2048, keysutil.KeyType_RSA3072, keysutil.KeyType_RSA4096,
-		keysutil.KeyType_MLDSA44, keysutil.KeyType_MLDSA65, keysutil.KeyType_MLDSA87:
+		keysutil.KeyType_MLDSA44, keysutil.KeyType_MLDSA65, keysutil.KeyType_MLDSA87,
+		keysutil.KeyType_SLHDSA:
 		retKeys := map[string]map[string]any{}
 		for k, v := range p.Keys {
 			key := asymKey{

@@ -26,7 +26,7 @@ Also added: specs for the DR operation-token ceremony route/schema surface
 FEATURE_ABSENT pending those routes).
 
 Live full-suite state on a fresh in-memory dev server (compat-harness, latest
-branch tip): **1043 PASS / 37 FEATURE_ABSENT / 24 FAIL / 27 SKIP**. The FAILs
+branch tip): **1045 PASS / 37 FEATURE_ABSENT / 23 FAIL / 26 SKIP**. The FAILs
 decompose as: 16 SCIM fixture-contract cases (clear when run with the
 documented SCIM-actor token — verified 20/20; the suite's shared token cannot
 be the registered actor), 3 audit cases requiring a dev server started with
@@ -34,11 +34,15 @@ be the registered actor), 3 audit cases requiring a dev server started with
 fixture
 gates (deliberate: the fixture-only suites FAIL their gate on non-fixture
 targets so the rest SKIP), 1 documented asynchronous namespace-deletion
-fixture race (direct retry succeeds), and SLH-DSA create — a documented
-clean-room deferral, not a spec error. FEATURE_ABSENT on the inmem dev
+fixture race (direct retry succeeds). FEATURE_ABSENT on the inmem dev
 target decomposes as: 28 raft-only routes (storage precondition, see below)
 and the 9 DR operation-token routes; the former mfa-stepup-requirements FA
-was fixed by writing to the mount the spec creates.
+was fixed by writing to the mount the spec creates. SLH-DSA — previously a
+documented clean-room deferral — is now implemented: `slh-dsa` transit keys
+with the 12 documented parameter sets (including the docs' `slh-dsa-shake-128`
+spelling at the SHAKE-128f list position), built on cloudflare/circl's FIPS 205
+package; the full pki-transit-ent family passes live (96/96) and SLH-DSA
+sign/verify round-trips live.
 Two more state notes: `sys-activation-flags-secrets-import` read-pre-activation
 requires a fresh server (the activation flag is one-time), and the
 namespace-deletion UI race self-heals on retry.
@@ -65,9 +69,8 @@ are environmental.
   tokenization (46/46) pass live on the plain dev server.
 
 Remaining documented-deferral items (after the above):
-the 9 DR operation-token routes (replication agent's lane, WIP), SLH-DSA
-transit key type (no in-tree FIPS 205 implementation), the KMIP TTLV binary
-listener protocol, secrets-sync provider execution against live cloud
+the 9 DR operation-token routes (replication agent's lane, WIP), the KMIP TTLV
+binary listener protocol, secrets-sync provider execution against live cloud
 destinations, performance-standby/consistency integration (requires the
 replication plane), and transform tokenization external stores (requires
 external tokenization providers).

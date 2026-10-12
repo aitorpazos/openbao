@@ -13,6 +13,7 @@ require (
 	cel.dev/cel-go v0.32.0
 	github.com/armon/go-radix v1.0.0
 	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/cloudflare/circl v1.6.3
 	github.com/containerd/errdefs v1.0.0
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/go-jose/go-jose/v4 v4.1.4

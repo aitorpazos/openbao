@@ -118,9 +118,19 @@ func TestTransit_Random(t *testing.T) {
 		req.Data["bytes"] = -1
 		doRequest(req, true, "", 0)
 
-		req.Data["format"] = "hex"
-		req.Data["bytes"] = random.APIMaxBytes + 1
-
-		doRequest(req, true, "", 0)
+		// Cap enforcement. The framework replaces body-set `source` with the
+		// (empty) URL-captured value on the plain path, so the seal/all cap
+		// binds through the URL form of the source parameter.
+		if source == "" || source == "platform" {
+			req.Path = "random"
+			req.Data["format"] = "hex"
+			req.Data["bytes"] = random.MaxPlatformBytes + 1
+			doRequest(req, true, "", 0)
+		} else {
+			req.Path = fmt.Sprintf("random/%s", source)
+			req.Data["format"] = "hex"
+			req.Data["bytes"] = random.MaxSealBytes + 1
+			doRequest(req, true, "", 0)
+		}
 	}
 }

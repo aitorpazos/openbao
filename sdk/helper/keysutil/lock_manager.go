@@ -403,6 +403,11 @@ func (lm *LockManager) GetPolicyWithLockType(ctx context.Context, req PolicyRequ
 				return nil, false, fmt.Errorf("key derivation and convergent encryption not supported for keys of type %v", req.KeyType)
 			}
 
+		case KeyType_SLHDSA:
+			if req.Derived || req.Convergent {
+				return nil, false, fmt.Errorf("key derivation and convergent encryption not supported for keys of type %v", req.KeyType)
+			}
+
 		case KeyType_HMAC:
 			if req.Derived || req.Convergent {
 				return nil, false, fmt.Errorf("key derivation and convergent encryption not supported for keys of type %v", req.KeyType)
