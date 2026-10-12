@@ -16,6 +16,16 @@ cases:
     expect:
       status: [401]
 
+  - id: ensure-kv2-secret
+    note: the family writes to secret/ which dev-mode targets mount as kv v2
+      by default; standard (raft/config) targets may not have it, so make the
+      mount exist here. An already-present mount (dev) answers 400.
+    request:
+      method: POST
+      path: /v1/sys/mounts/secret
+      body: {type: kv, options: {version: "2"}}
+    expect: {status: [200, 204, 400]}
+
   - id: policy-grant-subscribe
     note: Policy granting read on the subscribe path plus list+subscribe on the secret path with subscribe_event_types.
     request:

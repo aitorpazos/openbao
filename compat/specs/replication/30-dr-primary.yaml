@@ -26,7 +26,19 @@ cases:
         data.mode: primary
         data.state: running
         data.known_secondaries: []
-        data.last_dr_wal: 0
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [last_dr_wal, cluster_id, merkle_root]
+            properties:
+              # WAL counters are non-zero on a real raft server that has
+              # written entries; presence+type is the contract, not zero.
+              last_dr_wal: {type: integer}
+              cluster_id: {type: string}
+              merkle_root: {type: string}
   - id: combined-status-shows-dr
     request: {method: GET, path: /v1/sys/replication/status}
     no_auth: true

@@ -1444,8 +1444,15 @@ func (c *Core) handleRequest(ctx context.Context, req *logical.Request) (retResp
 		return nil, auth, retErr
 	}
 
-	// Route the request
-	resp, routeErr := c.doRoutingIfApproved(ctx, req, auth)
+	// Route the request. Recover requests dispatch through the snapshot
+	// recovery flow instead of the secret backends.
+	var resp *logical.Response
+	var routeErr error
+	if req.Operation == logical.RecoverOperation {
+		resp, routeErr = c.recoverSnapshotSecret(ctx, req)
+	} else {
+		resp, routeErr = c.doRoutingIfApproved(ctx, req, auth)
+	}
 	if resp != nil {
 
 		// If wrapping is used, use the shortest between the request and response

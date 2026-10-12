@@ -35,9 +35,17 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 		for _, c := range s.Cases {
 			r := Result{File: s.File, API: s.API, Feature: s.Feature, Case: c.ID}
 			for _, dep := range c.Depends {
-				if verdicts[dep] == "FAIL" {
+				// A dependency whose verdict is FAIL, ERROR, or
+				// FEATURE_ABSENT did not produce a working fixture: an
+				// errored export leaves an empty capture slot (ERROR),
+				// a feature-absent prerequisite means the flow cannot
+				// run on this target (FEATURE_ABSENT), and FAIL means
+				// the flow broke mid-way. Downstream cases SKIP either
+				// way — they never validate assertions against a
+				// fixture that does not exist.
+				if v := verdicts[dep]; v == "FAIL" || v == "ERROR" || v == "FEATURE_ABSENT" || v == "SKIP" {
 					r.Verdict = "SKIP"
-					r.Detail = "dependency " + dep + " failed"
+					r.Detail = "dependency " + dep + " " + v
 					break
 				}
 			}
@@ -78,12 +86,25 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		}
 		return "PASS", 0, "all actions succeeded", ""
 	}
+	if c.SleepMS > 0 {
+		time.Sleep(time.Duration(c.SleepMS) * time.Millisecond)
+	}
 	captured := ""
 	var payload []byte
 	if c.Request.BodyRaw != "" {
 		// Raw (non-JSON) body: base64-decoded, sent as octet-stream. Binary
 		// uploads such as raft snapshots cannot survive YAML/JSON round trips.
-		raw, err := base64.StdEncoding.DecodeString(c.Request.BodyRaw)
+		// Captured raw bodies re-enter here as their base64 string via a
+		// bare $slot reference; substitute before decoding.
+		sub, err := substituteCaptured(c.Request.BodyRaw, capturedData)
+		if err != nil {
+			return "ERROR", 0, err.Error(), captured
+		}
+		subStr, ok := sub.(string)
+		if !ok {
+			return "ERROR", 0, "body_raw substitution produced a non-string", captured
+		}
+		raw, err := base64.StdEncoding.DecodeString(subStr)
 		if err != nil {
 			return "ERROR", 0, err.Error(), captured
 		}
@@ -124,6 +145,15 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		req.Header.Set("Content-Type", "application/octet-stream")
 	}
 	for k, v := range c.Request.Headers {
+		// Header values may reference captured slots (e.g. a snapshot id
+		// minted by an earlier load case): substitute before sending.
+		sub, err := substituteCaptured(v, capturedData)
+		if err != nil {
+			return "ERROR", 0, err.Error(), captured
+		}
+		if s, ok := sub.(string); ok {
+			v = s
+		}
 		req.Header.Set(k, v)
 	}
 	effectiveToken := token
@@ -168,7 +198,7 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		return "ERROR", status, err.Error(), captured
 	}
 	var body any
-	if len(bytes.TrimSpace(b)) != 0 {
+	if len(bytes.TrimSpace(b)) != 0 && len(c.CaptureRaw) == 0 {
 		if err = json.Unmarshal(b, &body); err != nil {
 			return "ERROR", status, "bad JSON: " + err.Error(), captured
 		}
@@ -180,6 +210,16 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		}
 	}
 	if !accepted {
+		// Declared precondition unavailability: the target answered with a
+		// documented status that means the fixture cannot be established
+		// here (e.g. standard servers reject API audit enable with 400 in
+		// favor of declarative config). SKIP — not FAIL — so the family
+		// reports honestly across differently-provisioned targets.
+		for _, skip := range c.Expect.SkipOnStatus {
+			if status == skip {
+				return "SKIP", status, fmt.Sprintf("skipped: HTTP %d matches skip_on_status", status), captured
+			}
+		}
 		detail := fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status)
 		// Surface a short response excerpt so fixture-gate failures show
 		// the server's actual error instead of just the status code.
@@ -220,6 +260,10 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 				captured = tok
 			}
 		}
+	}
+	for _, name := range c.CaptureRaw {
+		enc := base64.StdEncoding.EncodeToString(b)
+		capturedData[name] = enc
 	}
 	for name, path := range c.Capture {
 		if v, ok := lookupPath(body, path); ok {

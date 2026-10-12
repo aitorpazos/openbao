@@ -96,6 +96,15 @@ func buildLogicalRequestNoAuth(w http.ResponseWriter, r *http.Request) (*logical
 		}
 
 	case "POST", "PUT":
+		// The documented recovery flow also accepts PUT/POST with the
+		// X-Vault-Recover-Snapshot-Id header as an alias for the RECOVER
+		// method. The payload is read from the loaded snapshot; the request
+		// body is ignored.
+		if r.Header.Get("X-Vault-Recover-Snapshot-Id") != "" {
+			op = logical.RecoverOperation
+			data = parseQuery(r.URL.Query())
+			break
+		}
 		op = logical.UpdateOperation
 
 		// If we are uploading a snapshot or receiving an ocsp-request (which
@@ -134,6 +143,11 @@ func buildLogicalRequestNoAuth(w http.ResponseWriter, r *http.Request) (*logical
 			return nil, http.StatusBadRequest, err
 		}
 
+	case "RECOVER":
+		op = logical.RecoverOperation
+		// Recovery requests carry their payload in the loaded snapshot, not
+		// in the request body; only query parameters are meaningful.
+		data = parseQuery(r.URL.Query())
 	case "LIST":
 		op = logical.ListOperation
 		if !strings.HasSuffix(path, "/") {

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 
 	"github.com/openbao/openbao/sdk/v2/framework"
 	"github.com/openbao/openbao/sdk/v2/logical"
@@ -20,6 +21,13 @@ import (
 // API contracts.
 func (b *SystemBackend) handleRekeyInit(recovery bool) framework.OperationFunc {
 	return func(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+		if req.ClientToken == "" {
+			// Documented: rekey endpoints are unauthenticated only with the
+			// disable_unauthed_rekey_endpoints listener property explicitly
+			// set to false; that registers the http special-case handler,
+			// which is the only unauthenticated route.
+			return nil, logical.ErrUnsupportedOperation
+		}
 		if recovery && !b.Core.SealAccess().RecoveryKeySupported() {
 			return logical.ErrorResponse("recovery rekeying not supported"), nil
 		}
@@ -35,10 +43,10 @@ func (b *SystemBackend) handleRekeyInit(recovery bool) framework.OperationFunc {
 			requireVerification := data.Get("require_verification").(bool)
 
 			if backup && len(pgpKeys) == 0 {
-				return logical.ErrorResponse("cannot request a backup of the new keys without providing PGP keys for encryption"), nil
+				return nil, logical.CodedError(http.StatusBadRequest, "cannot request a backup of the new keys without providing PGP keys for encryption")
 			}
 			if len(pgpKeys) > 0 && len(pgpKeys) != secretShares {
-				return logical.ErrorResponse("incorrect number of PGP keys for rekey"), nil
+				return nil, logical.CodedError(http.StatusBadRequest, "incorrect number of PGP keys for rekey")
 			}
 
 			if err := b.Core.RekeyInit(&SealConfig{
@@ -127,6 +135,9 @@ func (b *SystemBackend) rekeyInitStatus(ctx context.Context, recovery bool) (*lo
 // /sys/rekey-recovery-key/update operations.
 func (b *SystemBackend) handleRekeyUpdate(recovery bool) framework.OperationFunc {
 	return func(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+		if req.ClientToken == "" {
+			return nil, logical.ErrUnsupportedOperation
+		}
 		keyStr := data.Get("key").(string)
 		nonce := data.Get("nonce").(string)
 		if keyStr == "" {
@@ -184,6 +195,9 @@ func (b *SystemBackend) handleRekeyUpdate(recovery bool) framework.OperationFunc
 // /sys/rekey-recovery-key/verify operations.
 func (b *SystemBackend) handleRekeyVerify(recovery bool) framework.OperationFunc {
 	return func(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
+		if req.ClientToken == "" {
+			return nil, logical.ErrUnsupportedOperation
+		}
 		if recovery && !b.Core.SealAccess().RecoveryKeySupported() {
 			return logical.ErrorResponse("recovery rekeying not supported"), nil
 		}

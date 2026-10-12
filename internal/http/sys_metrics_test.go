@@ -108,11 +108,14 @@ func TestSysRekeyUnauthenticated(t *testing.T) {
 	ln, addr := TestServer(t, core)
 	TestServerAuth(t, addr, token)
 
-	// Default: Disallow unauthenticated access
+	// Default: Disallow unauthenticated access. Token-authenticated GET
+	// reaches the sys backend status handler since the rekey API routing
+	// change (sys-backend rekey handlers are routable with a token; the
+	// unauthenticated route remains gated on the listener property).
 	resp := testHttpGet(t, "", addr+"/v1/sys/rekey/init")
 	testResponseStatus(t, resp, 405)
 	resp = testHttpGet(t, token, addr+"/v1/sys/rekey/init")
-	testResponseStatus(t, resp, 405)
+	testResponseStatus(t, resp, 200)
 
 	// Close listener
 	ln.Close()

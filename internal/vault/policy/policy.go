@@ -37,6 +37,11 @@ const (
 	ScanCapability      = "scan"
 	SubscribeCapability = "subscribe"
 
+	// RecoverCapability grants recovering a secret from a loaded Raft
+	// snapshot into live cluster storage (Vault Enterprise documented
+	// capability; see docs/sysadmin/snapshots/recover-a-secret).
+	RecoverCapability = "recover"
+
 	// Backwards compatibility
 	OldDenyPathPolicy  = "deny"
 	OldReadPathPolicy  = "read"
@@ -55,6 +60,7 @@ const (
 	PatchCapabilityInt
 	ScanCapabilityInt
 	SubscribeCapabilityInt
+	RecoverCapabilityInt
 )
 
 // Currently only ACL policies are supported, with PolicyTypeToken being an
@@ -94,6 +100,7 @@ var cap2Int = map[string]uint32{
 	PatchCapability:     PatchCapabilityInt,
 	ScanCapability:      ScanCapabilityInt,
 	SubscribeCapability: SubscribeCapabilityInt,
+	RecoverCapability:   RecoverCapabilityInt,
 }
 
 // Policy is used to represent the policy specified by an ACL configuration.
@@ -682,7 +689,7 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 			pc.Capabilities = []string{DenyCapability}
 			pc.Permissions.CapabilitiesBitmap = DenyCapabilityInt
 			goto PathFinished
-		case CreateCapability, ReadCapability, UpdateCapability, DeleteCapability, ListCapability, SudoCapability, PatchCapability, ScanCapability, SubscribeCapability:
+		case CreateCapability, ReadCapability, UpdateCapability, DeleteCapability, ListCapability, SudoCapability, PatchCapability, ScanCapability, SubscribeCapability, RecoverCapability:
 			pc.Permissions.CapabilitiesBitmap |= cap2Int[cap]
 		default:
 			return nil, fmt.Errorf("path %q: invalid capability %q", key, cap)

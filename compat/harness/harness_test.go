@@ -236,7 +236,7 @@ func TestDepends(t *testing.T) {
 	for _, first := range []struct {
 		status int
 		want   string
-	}{{500, "SKIP"}, {200, "PASS"}, {404, "PASS"}} {
+	}{{500, "SKIP"}, {200, "PASS"}, {404, "SKIP"}} {
 		t.Run(fmt.Sprint(first.status), func(t *testing.T) {
 			calls := 0
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

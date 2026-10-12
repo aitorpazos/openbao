@@ -351,6 +351,14 @@ type Core struct {
 	// cubbyholeBackend is the backend which manages the per-token storage
 	cubbyholeBackend *CubbyholeBackend
 
+	// loadedSnapshot tracks the currently loaded isolated Raft snapshot
+	// (sys/storage/raft/snapshot-load) for secret recovery. Ownership is kept
+	// on the core so the recovery flow, which dispatches writes to arbitrary
+	// secret paths, can reach the loaded isolated view. Only one snapshot may
+	// be loaded at a time.
+	loadedSnapshotMu sync.Mutex
+	loadedSnapshot   *snapshotLoadService
+
 	// systemBarrierView is the barrier view for the system backend
 	systemBarrierView barrier.View
 

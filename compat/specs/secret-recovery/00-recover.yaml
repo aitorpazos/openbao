@@ -1,0 +1,408 @@
+# SPDX-License-Identifier: MPL-2.0
+api: secret_recovery
+# Vault Enterprise-compatible secret recovery from a loaded Raft snapshot.
+# Derived from the public Vault documentation:
+#   https://developer.hashicorp.com/vault/docs/sysadmin/snapshots/recover-a-secret/single-cluster
+#   Page version label: v2.x (latest). Enterprise-gated on that page.
+#
+# Documented surface (v2.x):
+#   - Load a snapshot (same cluster, same unseal keys), wait for status
+#     "ready", then recover a discrete secret:
+#       vault recover -snapshot-id <id> <mount_path>/<secret_path>
+#     API form: the RECOVER HTTP method on the secret path with the
+#     X-Vault-Recover-Snapshot-Id header; PUT/POST with the header is the
+#     documented alias.
+#   - X-Vault-Recover-Source-Path names the original path in the snapshot
+#     for recover-to-a-different-path; "so long as both paths are on the
+#     same mount".
+#   - "recover" is a policy capability; the caller needs it on the target
+#     path. Snapshot load/unload are restricted to the root namespace.
+#   - Supported plugins (docs table): cubbyhole, kv v1, ssh /config/ca,
+#     databases static-roles/static-creds (read-only for static-creds).
+#   - Disabled / re-created mounts cannot be associated (different internal
+#     identifiers), so recovery from them is impossible.
+#   - Verification: after recovery the secret reads at the target path.
+#
+# Requirements: raft-backed storage (snapshot export is raft-only) and a
+# clean in-process snapshot-load state (only one snapshot may be loaded at
+# a time). On non-raft targets the snapshot cases report FEATURE_ABSENT.
+# ssh/databases recovery is implemented as an explicit documented error
+# (plugin-internal config shapes are not written back through the public
+# API in this build); the error wording is asserted loosely.
+feature: secret-recovery
+source: https://developer.hashicorp.com/vault/docs/sysadmin/snapshots/recover-a-secret/single-cluster
+source_version: v2.x (latest)
+
+cases:
+  # ---- Setup (idempotent on reused clusters) ---------------------------
+  - id: cleanup-kv1
+    note: remove a leftover mount from a previous run (404 on clean clusters)
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/kvrec
+    expect:
+      status: [204, 404]
+
+  - id: cleanup-kv2
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/kv2x
+    expect:
+      status: [204, 404]
+
+  - id: cleanup-ssh
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/sshx
+    expect:
+      status: [204, 404]
+
+  - id: enable-kv1
+    note: kv v1 mount for the recovery flow (kv v1 is the documented recoverable form)
+    request:
+      method: POST
+      path: /v1/sys/mounts/kvrec
+      body:
+        type: kv
+        options:
+          version: "1"
+    expect:
+      status: [204]
+
+  - id: enable-kv2
+    note: kv v2 mount, to verify the documented version restriction
+    request:
+      method: POST
+      path: /v1/sys/mounts/kv2x
+      body:
+        type: kv
+        options:
+          version: "2"
+    expect:
+      status: [204]
+
+  - id: enable-ssh
+    note: ssh mount, to verify the config/ca recovery surface
+    request:
+      method: POST
+      path: /v1/sys/mounts/sshx
+      body:
+        type: ssh
+    expect:
+      status: [204]
+
+  - id: policy-cubby-recover
+    note: policy granting recover (plus normal cubbyhole access) for the recovery token
+    request:
+      method: POST
+      path: /v1/sys/policies/acl/recover-cubby
+      body:
+        policy: |
+          path "cubbyhole/*" {
+            capabilities = ["create", "read", "update", "delete", "list", "recover"]
+          }
+    expect:
+      status: [204]
+
+  - id: create-recovery-token
+    request:
+      method: POST
+      path: /v1/auth/token/create
+      body:
+        policies: ["recover-cubby"]
+        ttl: 24h
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [auth]
+        properties:
+          auth:
+            type: object
+            required: [client_token]
+            properties:
+              client_token:
+                type: string
+    capture:
+      token: auth.client_token
+
+  - id: write-kv1-secret
+    request:
+      method: POST
+      path: /v1/kvrec/app/cred
+      body:
+        token_value: BAO-RECOVER-EVIDENCE-9C016BB3
+        user: svc-app
+    expect:
+      status: [204]
+
+  - id: write-kv2-secret
+    request:
+      method: POST
+      path: /v1/kv2x/data/thing
+      body:
+        data:
+          v: kv2-secret-value
+    expect:
+      status: [200]
+
+  - id: write-cubby-secret
+    request:
+      method: POST
+      path: /v1/cubbyhole/notes/hello
+      body:
+        note: cubby-evidence
+    use_captured_token: token
+    expect:
+      status: [204]
+
+  # ---- Snapshot lifecycle ---------------------------------------------
+  - id: export-snapshot
+    note: binary raft snapshot; captured raw for the load step
+    request:
+      method: GET
+      path: /v1/sys/storage/raft/snapshot
+    expect:
+      status: [200]
+    capture_raw: [snap]
+
+  - id: load-snapshot
+    depends: [export-snapshot]
+    request:
+      method: POST
+      path: /v1/sys/storage/raft/snapshot-load
+      body_raw: $snap
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [snapshot_id, cluster_id, created_at, expires_at, status]
+            properties:
+              snapshot_id: {type: string}
+              cluster_id: {type: string}
+              created_at: {type: string}
+              expires_at: {type: string}
+              status: {type: string}
+    capture:
+      sid: data.snapshot_id
+
+  - id: wait-ready
+    depends: [load-snapshot]
+    sleep_ms: 2000
+    request:
+      method: GET
+      path: /v1/sys/storage/raft/snapshot-load/$sid
+    expect:
+      status: [200]
+      exact:
+        data.status: ready
+
+  # ---- Recovery happy paths -------------------------------------------
+  - id: delete-live-secret
+    depends: [load-snapshot]
+    request:
+      method: DELETE
+      path: /v1/kvrec/app/cred
+    expect:
+      status: [204]
+
+  - id: verify-deleted
+    depends: [load-snapshot]
+    request:
+      method: GET
+      path: /v1/kvrec/app/cred
+    expect:
+      status: [404]
+
+  - id: recover-recover-method
+    depends: [load-snapshot]
+    note: the RECOVER HTTP method with the snapshot-id header
+    request:
+      method: RECOVER
+      path: /v1/kvrec/app/cred
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+    expect:
+      status: [204]
+
+  - id: verify-recovered
+    depends: [load-snapshot]
+    note: documented verification step — the secret reads at the target path
+    request:
+      method: GET
+      path: /v1/kvrec/app/cred
+    expect:
+      status: [200]
+      exact:
+        data.token_value: BAO-RECOVER-EVIDENCE-9C016BB3
+        data.user: svc-app
+
+  - id: delete-for-new-path
+    depends: [load-snapshot]
+    request:
+      method: DELETE
+      path: /v1/kvrec/app/cred
+    expect:
+      status: [204]
+
+  - id: recover-to-different-path
+    depends: [load-snapshot]
+    note: X-Vault-Recover-Source-Path recovers to another path on the same mount
+    request:
+      method: PUT
+      path: /v1/kvrec/app/restored
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+        X-Vault-Recover-Source-Path: kvrec/app/cred
+    expect:
+      status: [204]
+
+  - id: verify-restored-copy
+    depends: [load-snapshot]
+    request:
+      method: GET
+      path: /v1/kvrec/app/restored
+    expect:
+      status: [200]
+      exact:
+        data.token_value: BAO-RECOVER-EVIDENCE-9C016BB3
+        data.user: svc-app
+
+  - id: cubbyhole-delete
+    depends: [load-snapshot]
+    request:
+      method: DELETE
+      path: /v1/cubbyhole/notes/hello
+    use_captured_token: token
+    expect:
+      status: [204]
+
+  - id: cubbyhole-recover
+    depends: [load-snapshot]
+    note: cubbyhole recovery resolves the snapshot's per-token namespace and
+      writes into the caller's own cubbyhole
+    request:
+      method: PUT
+      path: /v1/cubbyhole/notes/hello
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+    use_captured_token: token
+    expect:
+      status: [204]
+
+  - id: cubbyhole-verify
+    depends: [load-snapshot]
+    request:
+      method: GET
+      path: /v1/cubbyhole/notes/hello
+    use_captured_token: token
+    expect:
+      status: [200]
+      exact:
+        data.note: cubby-evidence
+
+  # ---- Error contract --------------------------------------------------
+  - id: cross-mount-rejected
+    depends: [load-snapshot]
+    note: documented constraint — recovery stays within the source mount
+    request:
+      method: PUT
+      path: /v1/kvrec/cross-mount
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+        X-Vault-Recover-Source-Path: cubbyhole/notes/hello
+    expect:
+      status: [500]
+      errors_contain:
+        - same mount
+
+  - id: no-header-rejected
+    depends: [load-snapshot]
+    note: a bare RECOVER request without the snapshot-id header
+    request:
+      method: RECOVER
+      path: /v1/kvrec/app/cred
+    expect:
+      status: [400]
+      errors_contain:
+        - X-Vault-Recover-Snapshot-Id
+
+  - id: wrong-snapshot-id
+    depends: [load-snapshot]
+    request:
+      method: PUT
+      path: /v1/kvrec/app/cred
+      headers:
+        X-Vault-Recover-Snapshot-Id: 00000000-0000-0000-0000-000000000000
+    expect:
+      status: [500]
+      errors_contain:
+        - is not the currently loaded snapshot
+
+  - id: source-not-in-snapshot
+    depends: [load-snapshot]
+    request:
+      method: PUT
+      path: /v1/kvrec/anywhere
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+        X-Vault-Recover-Source-Path: kvrec/nonexistent-path
+    expect:
+      status: [500]
+      errors_contain:
+        - not found in the loaded snapshot
+
+  - id: kv2-rejected
+    depends: [load-snapshot]
+    note: only kv version 1 is in the documented supported-plugins table
+    request:
+      method: PUT
+      path: /v1/kv2x/data/thing
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+        X-Vault-Recover-Source-Path: kv2x/data/thing
+    expect:
+      status: [500]
+      errors_contain:
+        - does not support snapshot recovery
+
+  - id: ssh-not-implemented
+    depends: [load-snapshot]
+    note: ssh config/ca is in the documented table but rejected with an
+      explicit error in this build (plugin-internal shapes are not rewritten)
+    request:
+      method: PUT
+      path: /v1/sshx/config/ca
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+        X-Vault-Recover-Source-Path: sshx/config/ca
+    expect:
+      status: [500]
+      errors_contain:
+        - not implemented in this build
+
+  # ---- Teardown / unloaded state --------------------------------------
+  - id: unload-snapshot
+    depends: [load-snapshot]
+    request:
+      method: DELETE
+      path: /v1/sys/storage/raft/snapshot-load/$sid
+    expect:
+      status: [204]
+
+  - id: recover-without-snapshot
+    depends: [load-snapshot]
+    note: recovery requires a loaded snapshot
+    request:
+      method: PUT
+      path: /v1/kvrec/app/cred
+      headers:
+        X-Vault-Recover-Snapshot-Id: $sid
+    expect:
+      status: [500]
+      errors_contain:
+        - no snapshot is currently loaded

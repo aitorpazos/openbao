@@ -24,13 +24,17 @@ notes: |
   delete server-side log files. Preserve/remove those separately after inspection.
 cases:
   - id: audit-enable-fallback
+    note: dev-mode targets allow API audit enable; standard servers document
+      the declarative-only contract and answer 400 ("cannot enable audit
+      device via API; use declarative, config-based audit device management
+      instead") — skip the filtering cases there rather than fail them.
     request:
       method: POST
       path: /v1/sys/audit/compat-ra-fallback
       body:
         type: file
         options: {file_path: /tmp/compat-ra-fallback.log, fallback: "true"}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-second-fallback-rejected
     depends: [audit-enable-fallback]
     request:
@@ -54,7 +58,7 @@ cases:
       body:
         type: file
         options: {file_path: /tmp/compat-ra-filter.log, filter: 'operation == "read"'}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-invalid-filter-property
     request:
       method: POST
@@ -72,7 +76,7 @@ cases:
         options:
           file_path: /tmp/compat-ra-exclude.log
           exclude: '[{"fields":["/response/data"]}]'
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-enable-conditional-exclusions
     request:
       method: POST
@@ -82,7 +86,7 @@ cases:
         options:
           file_path: /tmp/compat-ra-conditional.log
           exclude: '[{"condition":"\"/request/mount_type\" == transit","fields":["/request/data","/response/data"]},{"condition":"\"/auth/client_token\" matches \"hmac.+\"","fields":["/auth/entity_id"]}]'
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-exclusion-invalid-json
     request:
       method: POST
@@ -93,22 +97,22 @@ cases:
     expect: *invalid
   - id: audit-cleanup-filter
     request: {method: DELETE, path: /v1/sys/audit/compat-ra-filter}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-cleanup-invalid-filter
     request: {method: DELETE, path: /v1/sys/audit/compat-ra-invalid-filter}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-cleanup-exclude
     request: {method: DELETE, path: /v1/sys/audit/compat-ra-exclude}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-cleanup-conditional
     request: {method: DELETE, path: /v1/sys/audit/compat-ra-conditional}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-cleanup-invalid-exclude
     request: {method: DELETE, path: /v1/sys/audit/compat-ra-invalid-exclude}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-cleanup-second-fallback
     request: {method: DELETE, path: /v1/sys/audit/compat-ra-second-fallback}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}
   - id: audit-cleanup-fallback-last
     request: {method: DELETE, path: /v1/sys/audit/compat-ra-fallback}
-    expect: {status: [200, 204]}
+    expect: {status: [200, 204], skip_on_status: [400]}

@@ -42,21 +42,23 @@ cases:
         data.ssct_generation_counter: 0
         data.secondaries: []
         data.known_secondaries: []
-        data.last_performance_wal: 0
-        data.last_wal: 0
       body_schema:
         type: object
         required: [data]
         properties:
           data:
             type: object
-            required: [cluster_id, merkle_root, last_corruption_check_epoch, last_reindex_epoch, primary_cluster_addr]
+            required: [cluster_id, merkle_root, last_corruption_check_epoch, last_reindex_epoch, primary_cluster_addr, last_performance_wal, last_wal]
             properties:
               cluster_id: {type: string}
               merkle_root: {type: string}
               last_corruption_check_epoch: {type: string}
               last_reindex_epoch: {type: string}
               primary_cluster_addr: {type: string, pattern: '^https?://'}
+              # WAL counters are non-zero on a real raft server that has
+              # written entries; presence+type is the contract, not zero.
+              last_performance_wal: {type: integer}
+              last_wal: {type: integer}
   - id: perf-combined-status-shows-performance
     request: {method: GET, path: /v1/sys/replication/status}
     no_auth: true

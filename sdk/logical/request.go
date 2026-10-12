@@ -379,6 +379,11 @@ const (
 	RevokeOperation   Operation = "revoke"
 	RenewOperation    Operation = "renew"
 	RollbackOperation Operation = "rollback"
+
+	// RecoverOperation is sent when recovering a secret from a loaded Raft
+	// snapshot into live cluster storage. It targets the secret's mount path
+	// and is permitted by the "recover" policy capability.
+	RecoverOperation Operation = "recover"
 )
 
 var AllOperations = []Operation{
@@ -397,6 +402,7 @@ var AllOperations = []Operation{
 	RevokeOperation,
 	RenewOperation,
 	RollbackOperation,
+	RecoverOperation,
 }
 
 // ExternalOperations defines user-facing operations.
@@ -410,6 +416,7 @@ var ExternalOperations = []Operation{
 	ScanOperation,
 	HelpOperation,
 	HeaderOperation,
+	RecoverOperation,
 }
 
 // InternalOperations defines openbao-facing operations.

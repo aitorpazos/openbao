@@ -512,3 +512,57 @@ Deviations/limits (documented in `compat/specs/pki-cieps/notes.md`):
 - encoding/asn1 marshaling honors a set RawContent field verbatim — the
   re-signing code clears the TBS RawContent before re-marshaling so
   mutations (AIA/AKI/Issuer/inner signature algorithm) take effect.
+
+## Snapshot recovery of individual secrets (2026-10-12)
+
+Implements the documented Enterprise "recover a secret from a loaded snapshot"
+flow (`https://developer.hashicorp.com/vault/docs/sysadmin/snapshots/recover-a-secret/single-cluster`,
+Enterprise-only on upstream) as an API-compatible clean-room surface on OpenBao.
+
+Surface (documented by the recovery guide; sources cited inline):
+
+- `RECOVER` HTTP method (and PUT/POST alias with the same headers) on any
+  secret path, gated by the `X-Vault-Recover-Snapshot-Id` request header.
+  `X-Vault-Recover-Source-Path` recovers to a different path on the SAME
+  mount. `internal/http/logical.go` maps both to `logical.RecoverOperation`.
+- New `recover` ACL capability (`internal/vault/policy/policy.go`,
+  `internal/vault/policy/acl.go`) — its own capability bit, not a reuse of
+  update; `AllowOperation` maps RecoverOperation to it.
+- Recovery engine `internal/vault/logical_recover.go`:
+  - reads snapshot id + source path from request headers (the core derives
+    the request context from `activeContext`, so http-level context values
+    do not flow — headers are the transport),
+  - reads the SNAPSHOT's mount table from the isolated loaded-snapshot view
+    (`core/mounts/` + `core/local-mounts/`) via the load service registered
+    on the core (`Core.loadedSnapshotService`),
+  - longest-prefix mount match; cubbyhole uses a recursive per-token
+    scan with a tiebreaker preferring the caller's own CubbyholeID segment
+    (mirroring `router` salting semantics),
+  - same-mount constraint, plugin gates (kv v1/cubbyhole/generic only;
+    ssh and databases documented for later upstream versions are NOT
+    implemented — surfaced as 500 per the version gate),
+  - write-back routes a synthetic UpdateOperation (with the caller's
+    TokenEntry — the cubbyhole routeCommon requires it) through
+    `doRoutingOrRecover` intercept in `request_handling.go`.
+- Restrictions honored: no loaded snapshot -> 500; snapshot id mismatch ->
+  500; non-root namespace -> rejected; disabled mounts rejected; kv v2 ->
+  500 (only kv v1 documented); the load/unload paths remain root-namespace
+  only (existing snapshot-load service).
+
+Spec `compat/specs/secret-recovery/00-recover.yaml` — 32 cases, all PASS
+against a live raft server (kv v1 write->snapshot->delete->RECOVER->verify,
+recover-to-different-path via Source-Path header, cubbyhole per-token
+recovery, and the full error contract: no-header 400, wrong snapshot id,
+source-not-in-snapshot, kv2 rejected, ssh not-implemented, cross-mount,
+unload + recover-without-snapshot). Harness: `capture_raw` (binary snapshot
+export), request-header capture substitution, `sleep_ms`, and transitive
+dependency skipping (FAIL/ERROR/FEATURE_ABSENT/SKIP all propagate) so the
+family degrades to SKIP on non-raft targets instead of FAIL.
+
+Deviations/limits (documented in the spec family notes):
+- ssh (/config/ca) and databases static-role/static-cred recovery are
+  documented for upstream 1.20.3/1.20.4 — deliberately NOT implemented here;
+  they surface the documented version gate as a 500.
+- The recovery view is bounded to the currently loaded snapshot (the
+  documented 72h auto-unload and single-snapshot load rules come from the
+  existing load service).

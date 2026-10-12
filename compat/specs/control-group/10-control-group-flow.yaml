@@ -131,6 +131,14 @@ cases:
         member_entity_ids: ["$bob_entity"]
     expect:
       status: [200, 204]
+  - id: cleanup-mount-cgtest
+    note: a fresh (possibly restarted) target may hold cgtest from a previous
+      run as a non-versioned kv mount; removing it first makes the versioned
+      enable below deterministic instead of racing an async upgrade.
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/cgtest
+    expect: {status: [200, 204, 404]}
   - id: mount-kv-cgtest
     request:
       method: POST

@@ -36,6 +36,15 @@ type Case struct {
 	// (e.g. {accessor: wrap_info.accessor}). Names are file-scoped and can
 	// be referenced by later cases via $name in body strings.
 	Capture map[string]string `yaml:"capture"`
+	// CaptureRaw stores the RAW response body base64-encoded into the named
+	// capture slots (same slot namespace as Capture). Binary payloads such
+	// as raft snapshots can then be re-uploaded by a later case with
+	// `body_raw: $name` (the captured base64 string is substituted before
+	// decoding).
+	CaptureRaw []string `yaml:"capture_raw"`
+	// SleepMS pauses before sending this case's request (for async server
+	// transitions such as snapshot-load status changes).
+	SleepMS int `yaml:"sleep_ms"`
 	// UseCapturedToken sends the previously captured token instead of the
 	// run token for this case. true uses the slot named "token"
 	// (capture_token / capture: {token: ...}); a string value uses the
@@ -105,9 +114,15 @@ type Expect struct {
 	// Absent asserts that each dotted key is NOT present in the response
 	// (isolation checks: a namespaced object must not appear in a
 	// root-scoped response). A missing ancestor chain satisfies the check.
-	Absent []string  `yaml:"absent"`
-	Errors []string  `yaml:"errors_contain"`
-	Body   yaml.Node `yaml:"body"`
+	Absent []string `yaml:"absent"`
+	// SkipOnStatus declares statuses that mean "this precondition is not
+	// available on this target" (e.g. the documented 400 for API audit
+	// enable on standard servers that require declarative config). When
+	// the response status matches, the case SKIPs with that detail
+	// instead of FAILing; dependent cases skip transitively.
+	SkipOnStatus []int `yaml:"skip_on_status"`
+	Errors       []string  `yaml:"errors_contain"`
+	Body         yaml.Node `yaml:"body"`
 }
 type Statuses []int
 

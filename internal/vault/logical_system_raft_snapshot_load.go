@@ -35,6 +35,7 @@ const snapshotLoadLimit int64 = 1 << 30
 // Recovery request routing is deliberately not implemented by these endpoints.
 type snapshotLoadService struct {
 	mu     sync.Mutex
+	core   *Core
 	view   barrier.SecurityBarrier
 	data   map[string]interface{}
 	cancel context.CancelFunc
@@ -50,10 +51,19 @@ func (s *snapshotLoadService) unload() {
 		s.view = nil
 	}
 	s.data = nil
+	if s.core != nil {
+		s.core.setLoadedSnapshot(nil)
+	}
 }
 
 func (b *SystemBackend) snapshotLoadPaths() []*framework.Path {
 	s := new(snapshotLoadService)
+	if b.Core != nil {
+		// The recover flow (RECOVER method on secret paths) reads the loaded
+		// snapshot through the core registry, not through this service's own
+		// paths.
+		b.Core.setLoadedSnapshot(s)
+	}
 	op := func() framework.OperationHandler {
 		return &framework.PathOperation{Callback: func(ctx context.Context, req *logical.Request, d *framework.FieldData) (*logical.Response, error) {
 			return s.handle(ctx, b, req, d)
@@ -205,6 +215,10 @@ func (s *snapshotLoadService) loadSnapshotFile(ctx context.Context, b *SystemBac
 	s.data = map[string]interface{}{"cluster_id": clusterID, "snapshot_id": id, "created_at": now.Format(time.RFC3339Nano), "expires_at": now.Add(72 * time.Hour).Format(time.RFC3339Nano), "status": "ready"}
 	s.view = view
 	keep = true
+	if s.core == nil {
+		s.core = b.Core
+	}
+	b.Core.setLoadedSnapshot(s)
 	lifetime, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	go func() {
