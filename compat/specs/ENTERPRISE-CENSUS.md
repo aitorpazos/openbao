@@ -49,10 +49,26 @@ FEATURE_ABSENT by storage precondition, not by absence of code. Raft-only
 route registration under `raftStoragePaths()` means the inmem FA verdicts
 are environmental.
 
-Remaining documented-deferral families (Medium priority per the census):
-KMIP listener/CA/client fixtures, performance-standby/consistency
-integration, transform tokenization external stores, secrets-sync provider
-execution, positive identity/SCIM/SPIFFE fixtures requiring live providers.
+**Fixture-clearable verification (beyond the fresh dev target):**
+- SCIM: all 20 cases pass after the documented fixture bootstrap, now scripted
+  at `compat/scripts/scim-fixture.sh` (one-way activation + entity-bound actor
+  token + `compat-scim-actor` client registration). Verified 20/20 PASS with
+  0 FAIL/ERROR/SKIP on a disposable dev target.
+- Audit filtering: all 27 cases pass on a dev server started with
+  `-config` declaring `unsafe_allow_api_audit_creation = true` (27/27 PASS).
+- KMIP: the complete HTTP control-plane family passes live on the plain dev
+  server (38/38); the TTLV binary listener protocol is out of the HTTP
+  harness's declared scope.
+- Secrets-sync CRUD (43/43), SPIFFE workload identity (57/57) and transform
+  tokenization (46/46) pass live on the plain dev server.
+
+Remaining documented-deferral items (after the above):
+the 9 DR operation-token routes (replication agent's lane, WIP), SLH-DSA
+transit key type (no in-tree FIPS 205 implementation), the KMIP TTLV binary
+listener protocol, secrets-sync provider execution against live cloud
+destinations, performance-standby/consistency integration (requires the
+replication plane), and transform tokenization external stores (requires
+external tokenization providers).
 
 ## Scope, evidence, and interpretation
 
