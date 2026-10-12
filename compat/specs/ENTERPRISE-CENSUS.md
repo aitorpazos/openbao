@@ -42,10 +42,11 @@ implementation), and secrets-import pre-activation read shape. SKIP
 growth reflects the fixture- and mock-dependent cases that skip when
 their provisioning is absent (rekey verification/backup fixtures, CIEPS
 mock-mode scenarios documented in notes.md). FEATURE_ABSENT decomposes
-as: raft-integrated-storage prerequisites (autosnapshot 16, snapshot-load
-5, autopilot config 6, redundancy state 1), the 9 DR operation-token
-routes, and 2 rekey-recovery-key probes on the non-recovery-sealed dev
-target.
+as: the 9 DR operation-token routes (implementation belongs to the
+replication agent's lane) on every target. Secret recovery (32/32 on
+raft), mfa-requirements (41/41 on dev and raft), and all raft-gated
+families (raft-autosnapshot, raft-snapshot-load, raft-snapshot-autoload,
+autopilot-config, redundancy) PASS against the live raft server.
 
 Remaining documented-deferral families (Medium priority per the census):
 KMIP listener/CA/client fixtures, performance-standby/consistency
