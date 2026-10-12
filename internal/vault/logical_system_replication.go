@@ -272,6 +272,7 @@ func (b *SystemBackend) replicationPaths() []*framework.Path {
 	paths = append(paths, primaryLifecycle(drPrefix, replicationModeDR)...)
 	paths = append(paths, secondaryLifecycle(perfPrefix, replicationModePerformance)...)
 	paths = append(paths, secondaryLifecycle(drPrefix, replicationModeDR)...)
+	paths = append(paths, b.drOperationTokenPaths()...)
 
 	// paths-filter is performance-only per the documented surface.
 	paths = append(paths, &framework.Path{

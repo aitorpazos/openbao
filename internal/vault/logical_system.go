@@ -218,6 +218,9 @@ type SystemBackend struct {
 	namedMFAMethodLock namedMFAMethodLock
 	Core               *Core
 	logger             log.Logger
+	// drTokenState holds the DR operation-token generation ceremony state
+	// and live issued tokens (runtime-only).
+	drTokenState drTokenState
 }
 
 // handleConfigStateSanitized returns the current configuration state. The configuration

@@ -22,15 +22,19 @@ cases:
       status: 200
       body_schema:
         type: object
-        required: [started, nonce, progress, required, encoded_token, pgp_fingerprint, complete]
+        required: [data]
         properties:
-          started: {type: boolean}
-          nonce: {type: string}
-          progress: {type: integer}
-          required: {type: integer}
-          encoded_token: {type: string}
-          pgp_fingerprint: {type: string}
-          complete: {type: boolean}
+          data:
+            type: object
+            required: [started, nonce, progress, required, encoded_token, pgp_fingerprint, complete]
+            properties:
+              started: {type: boolean}
+              nonce: {type: string}
+              progress: {type: integer}
+              required: {type: integer}
+              encoded_token: {type: string}
+              pgp_fingerprint: {type: string}
+              complete: {type: boolean}
   - id: attempt-start-invalid-pgp
     request:
       method: POST

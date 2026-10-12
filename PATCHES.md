@@ -622,3 +622,50 @@ server, idempotent across reruns (async namespace deletion tolerated with
 Harness: Expect-section capture substitution (`substituteExpect`) for
 exact/contains/schema/absent values, including dotted keys with embedded
 `$slot` segments (per-segment substitution in `subKey`).
+
+## DR operation-token ceremony and secondary maintenance (2026-10-12)
+
+Public doc (developer.hashicorp.com/vault/api-docs/system/replication/replication-dr,
+v2.x latest): five DR-secondary routes — GET/POST/DELETE
+`sys/replication/dr/secondary/generate-operation-token/attempt`, POST
+`.../generate-operation-token/update`, POST `.../operation-token/delete`,
+POST `.../reindex`, POST `.../merkle-check`. All are restricted endpoints
+(root namespace) and conditionally unauthenticated only when HCL
+`enable_unauthenticated_access` includes `generate-operation-token` (this
+fork does not implement that opt-in, so the routes require authentication —
+matching the default posture and the spec's no-auth 403 probes).
+
+Implementation:
+- `internal/vault/dr_operation_token.go` (new): runtime-only ceremony state
+  (attempt nonce, required threshold, collected shares, OTP/PGP wrap, live
+  issued-token set) with XOR-pad OTP encoding (24-char pad, per the doc
+  sample's `otp_length: 24`) and PGP-wrapping via the shared
+  `pgpkeys.EncryptShares` helper. Share validation mirrors
+  `/sys/rekey/update`: hex-or-base64 decode, barrier key length bounds
+  including `shamir.ShareOverhead`; completion via `shamir.Combine`
+  (single share passes through for threshold 1). Tokens are 32 random
+  bytes; issued tokens are tracked in memory and revoked explicitly.
+- `internal/vault/logical_system_replication_dr.go` (new): the five paths,
+  registered after the secondary-lifecycle paths in `replicationPaths()`.
+  Root-namespace guard mirrors the snapshot-load convention; missing
+  `dr_operation_token`/`key`/`nonce` → 400 before any state access;
+  unknown operation tokens → 403; reindex recomputes the merkle root and
+  merkle-check delegates to the shared corruption-report implementation.
+  Deviations: the fork has no real DR streaming, so the ceremony runs on
+  any node (the docs describe DR-secondary nodes); issued tokens are not
+  persisted (a restart clears them).
+
+Spec `compat/specs/dr-ops/00-operation-token.yaml` — 14 cases: read-shape
+(wrapped in the documented `data` envelope), invalid-PGP 400, cancel,
+missing-key/nonce update rejections, operation-token-delete/reindex/
+merkle-check missing-token 400s, five unauthenticated 403 probes.
+14/14 PASS on dev and on the raft server.
+
+Live ceremony verification (not spec-asserted, per the notes' scope):
+- dev (threshold 1): POST attempt → nonce+OTP; POST update with the dev
+  unseal key → complete=true, encoded_token; OTP-XOR decode yields the
+  operation token; reindex 200; merkle-check 200 (corrupted_root: false);
+  wrong token → 403; revoke → 204; revoked token → 403.
+- raft (threshold 3, 5 shares): three shares → progress 1/2/3, complete at
+  3 (shamir.Combine exercised); token authorized for merkle-check + reindex;
+  revoke → 204; revocation re-check → 403.
