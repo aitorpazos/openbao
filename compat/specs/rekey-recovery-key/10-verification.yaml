@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: MPL-2.0
+api: recovery-key-rekey-verification
+feature: rekey-recovery-key
+source: https://developer.hashicorp.com/vault/api-docs/system/rekey-recovery-key
+source_version: "v2.x (latest)"
+notes: |
+  Optional fixture suite: run this file alone on a disposable recovery-sealed target
+  with a rekey already authorized into verification, n=2, t=2, progress=0.
+  A normal whole-directory run has no such fixture; the fixture gate must FAIL
+  and all other cases SKIP. 400/404 are accepted only at the gate to ensure a
+  missing fixture produces FAIL via shape checking, not FEATURE_ABSENT.
+  DELETE verify resets progress and changes the nonce; it does not cancel rekey.
+  Leave pending for external cleanup with DELETE init and its current nonce.
+  General status/error conventions: https://developer.hashicorp.com/vault/api-docs.
+cases:
+  - id: verification-fixture
+    request: {method: GET, path: /v1/sys/rekey-recovery-key/verify}
+    expect:
+      status: [200, 400, 404]
+      exact: {n: 2, t: 2, progress: 0}
+      body_schema: &verification
+        type: object
+        required: [nonce, n, t, progress]
+        properties:
+          nonce: {type: string, pattern: '.+'}
+          n: {type: integer}
+          t: {type: integer}
+          progress: {type: integer}
+  - id: read-verification-progress
+    depends: [verification-fixture]
+    request: {method: GET, path: /v1/sys/rekey-recovery-key/verify}
+    expect: {status: 200, exact: {n: 2, t: 2, progress: 0}, body_schema: *verification}
+  - id: verification-missing-key-and-nonce
+    depends: [verification-fixture]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/verify, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: verification-missing-key
+    depends: [verification-fixture]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/verify, body: {nonce: not-the-verification-nonce}}
+    expect: *invalid
+  - id: verification-missing-nonce
+    depends: [verification-fixture]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/verify, body: {key: not-a-new-recovery-share}}
+    expect: *invalid
+  - id: reset-verification
+    depends: [verification-fixture]
+    request: {method: DELETE, path: /v1/sys/rekey-recovery-key/verify}
+    expect: {status: 200, exact: {n: 2, t: 2, progress: 0}, body_schema: *verification}
+  - id: verification-progress-after-reset
+    depends: [verification-fixture, reset-verification]
+    request: {method: GET, path: /v1/sys/rekey-recovery-key/verify}
+    expect: {status: 200, exact: {n: 2, t: 2, progress: 0}, body_schema: *verification}

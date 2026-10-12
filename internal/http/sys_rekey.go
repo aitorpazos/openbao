@@ -129,7 +129,18 @@ func handleSysRekeyInitPut(ctx context.Context, core *vault.Core, recovery bool,
 }
 
 func handleSysRekeyInitDelete(ctx context.Context, core *vault.Core, recovery bool, w http.ResponseWriter, r *http.Request) {
-	if err := core.RekeyCancel(recovery); err != nil {
+	// The nonce is optional per the documented API; when provided it must
+	// match the current rekey operation for recent cancellations. It may
+	// arrive as a JSON body field or a query parameter.
+	var body struct {
+		Nonce string `json:"nonce"`
+	}
+	_ = parseJSONRequest(r, &body)
+	nonce := body.Nonce
+	if nonce == "" {
+		nonce = r.URL.Query().Get("nonce")
+	}
+	if err := core.RekeyCancel(recovery, nonce); err != nil {
 		respondError(w, err.Code(), err)
 		return
 	}

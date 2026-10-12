@@ -98,6 +98,7 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/identity/store.go`, `internal/vault/identity/store_oidc.go` | +OIDC workload path registrations in the identity store path builders | Plugin-token and secrets-sync discovery/JWKS endpoints per landed spec | — |
 | `internal/builtin/credential/ldap/backend.go` | static-migration empty-status returns an empty response instead of nil (nil renders as HTTP 404 on reads) | Conformance: documented empty migration status is 200/204 | — |
 | `internal/builtin/logical/database/path_config_connection.go`, `path_roles.go` | rootless-rotation connection fields + static-role password/skip-import-rotation fields | Vault-documented database rotation config surface | — |
+| `internal/vault/rekey.go`, `internal/vault/seal.go`, `internal/http/sys_rekey.go` | Invalid rekey/recovery-rekey configuration now returns 400 (was 500); `SealConfig.InitializedAt` (in-memory, JSON-omitted); `RekeyCancel(recovery, nonce)` enforces the documented ten-minute cancellation rule; the DELETE init handler parses the nonce from the request body | Public `/sys/rekey-recovery-key` + `/sys/rekey` API contract: 400 for invalid input per the documented status-code conventions, and "If the rekey was initialized within the last 10 minutes, you must provide the nonce to cancel the operation" (api-docs/system/rekey-recovery-key, v2.x latest) | — |
 
 ### Redundancy zones (compat-harness branch)
 

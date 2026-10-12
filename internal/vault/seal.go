@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -317,6 +318,12 @@ type SealConfig struct {
 
 	// Stores the progress of the verification operation (key shares)
 	VerificationProgress [][]byte `json:"-"`
+
+	// InitializedAt records when this rekey attempt was initialized, for the
+	// documented rule that a rekey initialized within the last 10 minutes
+	// requires its nonce to be cancelled. Omitted from JSON: rekey state is
+	// in-memory only and never persisted.
+	InitializedAt time.Time `json:"-"`
 }
 
 // baseValidate is used as a shared base between `Validate` and `ValidateRecovery`

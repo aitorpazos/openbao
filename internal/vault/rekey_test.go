@@ -57,7 +57,7 @@ func testCore_Rekey_Lifecycle_Common(t *testing.T, c *Core, recovery bool) {
 	}
 
 	// Cancel should be idempotent
-	err = c.RekeyCancel(false)
+	err = c.RekeyCancel(false, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -78,12 +78,19 @@ func testCore_Rekey_Lifecycle_Common(t *testing.T, c *Core, recovery bool) {
 		t.Fatalf("err: %v", err)
 	}
 	newConf.Nonce = conf.Nonce
+	newConf.InitializedAt = conf.InitializedAt
 	if !reflect.DeepEqual(conf, newConf) {
 		t.Fatalf("bad: %v", conf)
 	}
 
+	// Cancel without the nonce of a recent rekey is rejected
+	err = c.RekeyCancel(recovery, "")
+	if err == nil {
+		t.Fatal("expected nonce-less cancellation of a recent rekey to fail")
+	}
+
 	// Cancel should be clear
-	err = c.RekeyCancel(recovery)
+	err = c.RekeyCancel(recovery, conf.Nonce)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: MPL-2.0
+api: recovery-key-rekey
+feature: rekey-recovery-key
+source: https://developer.hashicorp.com/vault/api-docs/system/rekey-recovery-key
+source_version: "v2.x (latest)"
+notes: |
+  Root namespace, disposable unsealed recovery-capable seal, administrative token.
+  Initially no recovery rekey or verification attempt; current recovery threshold 1.
+  All cases directly depend on the seal fixture gate: SKIP does not propagate.
+  This static suite starts but never completes a recovery-key rotation. On a
+  supporting target it leaves an attempt pending; cancel externally using the
+  nonce from GET init. Run within ten minutes (recent cancellation nonce rule).
+  The latest docs require a nonce when cancelling a recently started attempt;
+  older versions may not enforce this. No recovery shares are embedded here.
+  General status/errors: https://developer.hashicorp.com/vault/api-docs.
+  Fixture: https://developer.hashicorp.com/vault/api-docs/system/seal-status.
+cases:
+  - id: recovery-seal-fixture
+    request: {method: GET, path: /v1/sys/seal-status}
+    expect:
+      status: 200
+      exact: {initialized: true, sealed: false, recovery_seal: true}
+  - id: initial-progress
+    depends: [recovery-seal-fixture]
+    request: {method: GET, path: /v1/sys/rekey-recovery-key/init}
+    expect:
+      status: 200
+      exact: {started: false, progress: 0, required: 1}
+      body_schema: &progress
+        type: object
+        required: [started, nonce, t, n, progress, required]
+        properties:
+          started: {type: boolean}
+          nonce: {type: string}
+          t: {type: integer}
+          n: {type: integer}
+          progress: {type: integer}
+          required: {type: integer}
+  - id: missing-share-parameters
+    depends: [recovery-seal-fixture, initial-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/init, body: {}}
+    expect: &invalid
+      status: 400
+      body_schema:
+        type: object
+        required: [errors]
+        properties: {errors: {type: array, items: {type: string}}}
+  - id: missing-share-count
+    depends: [recovery-seal-fixture, initial-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/init, body: {secret_threshold: 1}}
+    expect: *invalid
+  - id: missing-threshold
+    depends: [recovery-seal-fixture, initial-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/init, body: {secret_shares: 1}}
+    expect: *invalid
+  - id: threshold-exceeds-shares
+    depends: [recovery-seal-fixture, initial-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/init, body: {secret_shares: 1, secret_threshold: 2}}
+    expect: *invalid
+  - id: malformed-pgp-key
+    depends: [recovery-seal-fixture, initial-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/init, body: {secret_shares: 1, secret_threshold: 1, pgp_keys: [not-base64!]}}
+    expect: *invalid
+  - id: invalid-requests-did-not-start-rekey
+    depends: [recovery-seal-fixture, initial-progress, missing-share-parameters, missing-share-count, missing-threshold, threshold-exceeds-shares, malformed-pgp-key]
+    request: {method: GET, path: /v1/sys/rekey-recovery-key/init}
+    expect: {status: 200, exact: {started: false, progress: 0}, body_schema: *progress}
+  - id: start-with-verification
+    depends: [recovery-seal-fixture, initial-progress, invalid-requests-did-not-start-rekey]
+    request:
+      method: POST
+      path: /v1/sys/rekey-recovery-key/init
+      body: {secret_shares: 2, secret_threshold: 2, require_verification: true}
+    expect: {status: [200, 204]}
+  - id: configured-progress
+    depends: [recovery-seal-fixture, initial-progress, start-with-verification]
+    request: {method: GET, path: /v1/sys/rekey-recovery-key/init}
+    expect:
+      status: 200
+      exact: {started: true, n: 2, t: 2, required: 1, progress: 0, verification_required: true}
+      body_schema: *progress
+    capture: {rknonce: nonce}
+  - id: concurrent-start-rejected
+    depends: [recovery-seal-fixture, initial-progress, start-with-verification, configured-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/init, body: {secret_shares: 1, secret_threshold: 1}}
+    expect: *invalid
+  - id: update-missing-key-and-nonce
+    depends: [recovery-seal-fixture, initial-progress, start-with-verification, configured-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/update, body: {}}
+    expect: *invalid
+  - id: update-missing-key
+    depends: [recovery-seal-fixture, initial-progress, start-with-verification, configured-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/update, body: {nonce: not-the-operation-nonce}}
+    expect: *invalid
+  - id: update-missing-nonce
+    depends: [recovery-seal-fixture, initial-progress, start-with-verification, configured-progress]
+    request: {method: POST, path: /v1/sys/rekey-recovery-key/update, body: {key: not-a-recovery-share}}
+    expect: *invalid
+  - id: recent-cancel-requires-nonce
+    depends: [recovery-seal-fixture, initial-progress, start-with-verification, configured-progress]
+    request: {method: DELETE, path: /v1/sys/rekey-recovery-key/init, body: {}}
+    expect: *invalid
+  - id: progress-unchanged-after-rejections
+    depends: [recovery-seal-fixture, initial-progress, start-with-verification, configured-progress, concurrent-start-rejected, update-missing-key-and-nonce, update-missing-key, update-missing-nonce, recent-cancel-requires-nonce]
+    request: {method: GET, path: /v1/sys/rekey-recovery-key/init}
+    expect:
+      status: 200
+      exact: {started: true, n: 2, t: 2, progress: 0, required: 1, verification_required: true}
+      body_schema: *progress
+  - id: cancel-nonce-mismatch-rejected
+    depends: [progress-unchanged-after-rejections]
+    request:
+      method: DELETE
+      path: /v1/sys/rekey-recovery-key/init
+      body: {nonce: not-the-operation-nonce}
+    expect: *invalid
+  - id: cleanup-cancel-rekey
+    depends: [progress-unchanged-after-rejections, cancel-nonce-mismatch-rejected]
+    request:
+      method: DELETE
+      path: /v1/sys/rekey-recovery-key/init
+      body: {nonce: $rknonce}
+    expect: {status: [200, 204]}

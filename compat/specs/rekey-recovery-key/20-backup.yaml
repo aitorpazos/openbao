@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: MPL-2.0
+api: recovery-key-rekey-backup
+feature: rekey-recovery-key
+source: https://developer.hashicorp.com/vault/api-docs/system/rekey-recovery-key
+source_version: "v2.x (latest)"
+notes: |
+  Optional fixture: a disposable target with an existing PGP-encrypted recovery
+  rekey backup. The final case permanently deletes that backup; retain shares
+  independently. Never run against real backups. No recovery key is submitted.
+  Use the method tables' /sys/rekey/recovery-key-backup, not the inconsistent
+  /sys/rekey-recovery-key/backup reference in the start-rekey parameter prose.
+  Gate 400/404 statuses are fixture detection, NOT successful backup responses:
+  errors-only JSON fails the required nonce/keys schema and gates the delete.
+  Response keys follow the page's top-level example. Actual wrapped responses
+  will fail, rather than silently weaken the documented response contract.
+cases:
+  - id: backup-fixture
+    request: {method: GET, path: /v1/sys/rekey/recovery-key-backup}
+    expect:
+      status: [200, 400, 404]
+      body_schema: &backup
+        type: object
+        required: [nonce, keys]
+        properties:
+          nonce: {type: string, pattern: '.+'}
+          keys: {type: object}
+  - id: read-backup
+    depends: [backup-fixture]
+    request: {method: GET, path: /v1/sys/rekey/recovery-key-backup}
+    expect: {status: 200, body_schema: *backup}
+  - id: delete-backup
+    depends: [backup-fixture, read-backup]
+    request: {method: DELETE, path: /v1/sys/rekey/recovery-key-backup}
+    expect: {status: [200, 204]}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"reflect"
 	"testing"
 
@@ -165,15 +166,18 @@ func TestSysRekey_Init_Cancel(t *testing.T) {
 		defer cluster.Cleanup()
 		cl := cluster.Cores[0].Client
 
-		_, err := cl.Logical().Write("sys/rekey/init", map[string]any{
+		initResp, err := cl.Logical().Write("sys/rekey/init", map[string]any{
 			"secret_shares":    5,
 			"secret_threshold": 3,
 		})
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
+		nonce := initResp.Data["nonce"].(string)
 
-		_, err = cl.Logical().Delete("sys/rekey/init")
+		// The rekey was initialized moments ago, so the nonce is required
+		// to cancel within the documented ten-minute window.
+		_, err = cl.Logical().DeleteWithData("sys/rekey/init", map[string][]string{"nonce": {nonce}})
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
@@ -319,7 +323,21 @@ func TestSysRekey_ReInitUpdate(t *testing.T) {
 	})
 	testResponseStatus(t, resp, 200)
 
-	resp = testHttpDelete(t, token, addr+"/v1/sys/rekey/init")
+	resp = testHttpGet(t, token, addr+"/v1/sys/rekey/init")
+	if resp == nil || resp.Body == nil {
+		t.Fatal("missing rekey status response")
+	}
+	var initStatus struct {
+		Nonce string `json:"nonce"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&initStatus); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	// The rekey was initialized moments ago, so the nonce is required to
+	// cancel within the documented ten-minute window.
+	resp = testHttpDelete(t, token, addr+"/v1/sys/rekey/init?nonce="+url.QueryEscape(initStatus.Nonce))
 	testResponseStatus(t, resp, 204)
 
 	resp = testHttpPut(t, token, addr+"/v1/sys/rekey/init", map[string]any{

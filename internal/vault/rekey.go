@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/hashicorp/go-uuid"
 	"github.com/openbao/openbao/sdk/v2/helper/consts"
@@ -32,6 +33,10 @@ const (
 	// recovery keys if specified during a rekey operation. This is outside of
 	// the barrier.
 	coreRecoveryUnsealKeysBackupPath = "core/recovery-keys-backup"
+
+	// rekeyCancellationNonceWindow is the documented window during which a
+	// rekey cancellation requires the operation's nonce.
+	rekeyCancellationNonceWindow = 10 * time.Minute
 )
 
 // RekeyResult is used to provide the key parts back after
@@ -184,7 +189,7 @@ func (c *Core) BarrierRekeyInit(config *SealConfig) logical.HTTPCodedError {
 		// Check if the seal configuration is valid
 		if err := config.Validate(); err != nil {
 			c.logger.Error("invalid rekey seal configuration", "error", err)
-			return logical.CodedError(http.StatusInternalServerError, "invalid rekey seal configuration: %v", err)
+			return logical.CodedError(http.StatusBadRequest, "invalid rekey seal configuration: %v", err)
 		}
 	}
 
@@ -215,6 +220,7 @@ func (c *Core) BarrierRekeyInit(config *SealConfig) logical.HTTPCodedError {
 		return logical.CodedError(http.StatusInternalServerError, "error generating nonce for procedure: %v", err)
 	}
 	c.rootRotationConfig.Nonce = nonce
+	c.rootRotationConfig.InitializedAt = time.Now()
 
 	c.logger.Info("rekey initialized", "nonce", c.rootRotationConfig.Nonce, "shares", c.rootRotationConfig.SecretShares, "threshold", c.rootRotationConfig.SecretThreshold, "validation_required", c.rootRotationConfig.VerificationRequired)
 	return nil
@@ -227,7 +233,7 @@ func (c *Core) RecoveryRekeyInit(config *SealConfig) logical.HTTPCodedError {
 	// deny the request if it does not pass the validation check
 	if err := config.Validate(); err != nil {
 		c.logger.Error("invalid recovery configuration", "error", err)
-		return logical.CodedError(http.StatusInternalServerError, "invalid recovery configuration: %v", err)
+		return logical.CodedError(http.StatusBadRequest, "invalid recovery configuration: %v", err)
 	}
 
 	if !c.seal.RecoveryKeySupported() {
@@ -261,6 +267,7 @@ func (c *Core) RecoveryRekeyInit(config *SealConfig) logical.HTTPCodedError {
 		return logical.CodedError(http.StatusInternalServerError, "error generating nonce for procedure: %v", err)
 	}
 	c.recoveryRotationConfig.Nonce = nonce
+	c.recoveryRotationConfig.InitializedAt = time.Now()
 
 	c.logger.Info("rekey initialized", "nonce", c.recoveryRotationConfig.Nonce, "shares", c.recoveryRotationConfig.SecretShares, "threshold", c.recoveryRotationConfig.SecretThreshold, "validation_required", c.recoveryRotationConfig.VerificationRequired)
 	return nil
@@ -826,8 +833,10 @@ func (c *Core) RekeyVerify(ctx context.Context, key []byte, nonce string, recove
 	return res, nil
 }
 
-// RekeyCancel is used to cancel an in-progress rekey
-func (c *Core) RekeyCancel(recovery bool) logical.HTTPCodedError {
+// RekeyCancel is used to cancel an in-progress rekey. The documented API
+// requires the rekey nonce when the attempt was initialized within the last
+// ten minutes; older attempts may be cancelled without it.
+func (c *Core) RekeyCancel(recovery bool, nonce string) logical.HTTPCodedError {
 	c.stateLock.RLock()
 	defer c.stateLock.RUnlock()
 	if c.Sealed() {
@@ -839,6 +848,21 @@ func (c *Core) RekeyCancel(recovery bool) logical.HTTPCodedError {
 
 	c.rotationLock.Lock()
 	defer c.rotationLock.Unlock()
+
+	var conf *SealConfig
+	if recovery {
+		conf = c.recoveryRotationConfig
+	} else {
+		conf = c.rootRotationConfig
+	}
+	if conf != nil && !conf.InitializedAt.IsZero() && time.Since(conf.InitializedAt) < rekeyCancellationNonceWindow {
+		if nonce == "" {
+			return logical.CodedError(http.StatusBadRequest, "the nonce must be provided to cancel a rekey that was initialized in the last %d minutes", int(rekeyCancellationNonceWindow.Minutes()))
+		}
+		if nonce != conf.Nonce {
+			return logical.CodedError(http.StatusBadRequest, "the provided nonce does not match the current rekey nonce")
+		}
+	}
 
 	// Clear any progress or config
 	if recovery {
