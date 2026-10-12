@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-namespaces-identity-isolation
+feature: namespaces-identity
+source: https://developer.hashicorp.com/vault/docs/enterprise/namespaces
+source_version: v2.x (latest)
+notes: >-
+  Source: the Vault Enterprise namespaces guide (identity isolation —
+  entities, groups, and their policies are namespace-scoped) and the
+  identity API (api-docs/secret/identity/entity, .../group). Verified live
+  on the fork: an entity created with an X-Vault-Namespace header is
+  scoped to that namespace (its list and read are empty/404 at the root
+  namespace), and vice versa. Namespace-scoped isolation is asserted by
+  cross-reading the created object without the namespace header (404) and
+  within it (200). The namespace's entity IDs carry the namespace suffix
+  (observed, not asserted — the format is not documented).
+cases:
+  - id: create-ns
+    request:
+      method: POST
+      path: /v1/sys/namespaces/nsident
+    expect:
+      status: [200, 204]
+  - id: entity-create-in-ns
+    request:
+      method: POST
+      path: /v1/identity/entity
+      headers: {X-Vault-Namespace: nsident}
+      body: {name: nsident-ent-1}
+    expect:
+      status: [200, 204]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [id]
+            properties:
+              id: {type: string}
+              name: {type: string}
+    capture:
+      ent: data.id
+  - id: entity-read-in-ns
+    request:
+      method: GET
+      path: /v1/identity/entity/id/$ent
+      headers: {X-Vault-Namespace: nsident}
+    expect:
+      status: [200]
+  - id: entity-read-at-root-isolated
+    request:
+      method: GET
+      path: /v1/identity/entity/id/$ent
+    expect:
+      status: [404]
+  - id: group-create-in-ns
+    request:
+      method: POST
+      path: /v1/identity/group
+      headers: {X-Vault-Namespace: nsident}
+      body: {name: nsident-group-1}
+    expect:
+      status: [200, 204]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [id]
+            properties:
+              id: {type: string}
+    capture:
+      grp: data.id
+  - id: group-read-in-ns
+    request:
+      method: GET
+      path: /v1/identity/group/id/$grp
+      headers: {X-Vault-Namespace: nsident}
+    expect:
+      status: [200]
+  - id: group-read-at-root-isolated
+    request:
+      method: GET
+      path: /v1/identity/group/id/$grp
+    expect:
+      status: [404]
+  - id: cleanup-entity
+    request:
+      method: DELETE
+      path: /v1/identity/entity/id/$ent
+      headers: {X-Vault-Namespace: nsident}
+    expect:
+      status: [204]
+  - id: cleanup-group
+    request:
+      method: DELETE
+      path: /v1/identity/group/id/$grp
+      headers: {X-Vault-Namespace: nsident}
+    expect:
+      status: [204]
+  - id: cleanup-ns
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/nsident
+    expect:
+      status: [200, 204, 400]

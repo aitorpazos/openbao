@@ -785,6 +785,7 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 						OperationVerb:   "read",
 						OperationSuffix: "progress",
 					},
+					Callback: b.handleRekeyInit(false),
 					Responses: map[int][]framework.Response{
 						http.StatusOK: {{
 							Description: "OK",
@@ -797,6 +798,7 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 					DisplayAttrs: &framework.DisplayAttributes{
 						OperationVerb: "initialize",
 					},
+					Callback: b.handleRekeyInit(false),
 					Responses: map[int][]framework.Response{
 						http.StatusOK: {{
 							Description: "OK",
@@ -810,6 +812,7 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 					DisplayAttrs: &framework.DisplayAttributes{
 						OperationVerb: "cancel",
 					},
+					Callback: b.handleRekeyInit(false),
 					Responses: map[int][]framework.Response{
 						http.StatusOK: {{
 							Description: "OK",
@@ -949,6 +952,7 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 						OperationPrefix: "rekey-attempt",
 						OperationVerb:   "update",
 					},
+					Callback: b.handleRekeyUpdate(false),
 					Responses: map[int][]framework.Response{
 						http.StatusOK: {{
 							Description: "OK",
@@ -1026,6 +1030,7 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 						OperationVerb:   "read",
 						OperationSuffix: "progress",
 					},
+					Callback: b.handleRekeyVerify(false),
 					Responses: map[int][]framework.Response{
 						http.StatusOK: {{
 							Description: "OK",
@@ -1059,6 +1064,7 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 					DisplayAttrs: &framework.DisplayAttributes{
 						OperationVerb: "cancel",
 					},
+					Callback: b.handleRekeyVerify(false),
 					Responses: map[int][]framework.Response{
 						http.StatusOK: {{
 							Description: "OK",
@@ -1093,6 +1099,7 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 					DisplayAttrs: &framework.DisplayAttributes{
 						OperationVerb: "update",
 					},
+					Callback: b.handleRekeyVerify(false),
 					Responses: map[int][]framework.Response{
 						http.StatusOK: {{
 							Description: "OK",
@@ -1112,6 +1119,212 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 			},
 		},
 
+		{
+			// The recovery-key rekey endpoints (Vault Enterprise: recovery
+			// keys are only applicable to seals that support them; see the
+			// rekey-recovery-key API docs). The handlers mirror the barrier
+			// rekey handlers with recovery=true.
+			Pattern: "rekey-recovery-key/init",
+
+			DisplayAttrs: &framework.DisplayAttributes{
+				OperationPrefix: "rekey-attempt",
+			},
+
+			Fields: map[string]*framework.FieldSchema{
+				"secret_shares": {
+					Type:        framework.TypeInt,
+					Description: "Specifies the number of shares to split the recovery key into.",
+				},
+				"secret_threshold": {
+					Type:        framework.TypeInt,
+					Description: "Specifies the number of shares required to reconstruct the recovery key. This must be less than or equal to secret_shares.",
+				},
+				"pgp_keys": {
+					Type:        framework.TypeCommaStringSlice,
+					Description: "Specifies an array of PGP public keys used to encrypt the output recovery key shares. Ordering is preserved. The keys must be base64-encoded from their original binary representation. The size of this array must be the same as secret_shares.",
+				},
+				"backup": {
+					Type:        framework.TypeBool,
+					Description: "Specifies if using PGP-encrypted keys, whether Vault should also store a plaintext backup of the PGP-encrypted keys.",
+				},
+				"require_verification": {
+					Type:        framework.TypeBool,
+					Description: "Turns on verification functionality",
+				},
+			},
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					DisplayAttrs: &framework.DisplayAttributes{
+						OperationVerb:   "read",
+						OperationSuffix: "progress",
+					},
+					Callback: b.handleRekeyInit(true),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields:      respFields,
+						}},
+					},
+					Summary: "Reads the configuration and progress of the current recovery key rekey attempt.",
+				},
+				logical.UpdateOperation: &framework.PathOperation{
+					DisplayAttrs: &framework.DisplayAttributes{
+						OperationVerb: "initialize",
+					},
+					Callback: b.handleRekeyInit(true),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields:      respFields,
+						}},
+					},
+					Summary:     "Initializes a new recovery key rekey attempt.",
+					Description: "Only a single recovery key rekey attempt can take place at a time, and changing the parameters of a rekey requires canceling and starting a new rekey, which will also provide a new nonce.",
+				},
+				logical.DeleteOperation: &framework.PathOperation{
+					DisplayAttrs: &framework.DisplayAttributes{
+						OperationVerb: "cancel",
+					},
+					Callback: b.handleRekeyInit(true),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
+					Summary:     "Cancels any in-progress recovery key rekey.",
+					Description: "This clears the rekey settings as well as any progress made. This must be called to change the parameters of the rekey. Note: verification is still a part of a rekey. If rekeying is canceled during the verification flow, the current unseal keys remain valid.",
+				},
+			},
+		},
+		{
+			Pattern: "rekey-recovery-key/update",
+
+			DisplayAttrs: &framework.DisplayAttributes{
+				OperationPrefix: "rekey-attempt",
+				OperationVerb:   "update",
+			},
+
+			Fields: map[string]*framework.FieldSchema{
+				"key": {
+					Type:        framework.TypeString,
+					Description: "Specifies a single recovery key share.",
+				},
+				"nonce": {
+					Type:        framework.TypeString,
+					Description: "Specifies the nonce of the recovery key rekey attempt.",
+				},
+			},
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleRekeyUpdate(true),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"complete": {
+									Type: framework.TypeBool,
+								},
+								"keys": {
+									Type: framework.TypeCommaStringSlice,
+								},
+								"keys_base64": {
+									Type: framework.TypeCommaStringSlice,
+								},
+								"verification_required": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"verification_nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"backup": {
+									Type: framework.TypeBool,
+								},
+								"pgp_fingerprints": {
+									Type: framework.TypeCommaStringSlice,
+								},
+							},
+						}},
+					},
+					Summary: "Enter a single recovery key share to progress the recovery key rekey.",
+				},
+			},
+		},
+		{
+			Pattern: "rekey-recovery-key/verify",
+
+			DisplayAttrs: &framework.DisplayAttributes{
+				OperationPrefix: "rekey-verification",
+			},
+
+			Fields: map[string]*framework.FieldSchema{
+				"key": {
+					Type:        framework.TypeString,
+					Description: "Specifies a single recovery key share from the new set of shares.",
+				},
+				"nonce": {
+					Type:        framework.TypeString,
+					Description: "Specifies the nonce of the rekey verification operation.",
+				},
+			},
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					DisplayAttrs: &framework.DisplayAttributes{
+						OperationVerb:   "read",
+						OperationSuffix: "progress",
+					},
+					Callback: b.handleRekeyVerify(true),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Read the configuration and progress of the current recovery key rekey verification attempt.",
+				},
+				logical.DeleteOperation: &framework.PathOperation{
+					DisplayAttrs: &framework.DisplayAttributes{
+						OperationVerb: "cancel",
+					},
+					Callback: b.handleRekeyVerify(true),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
+					Summary:     "Cancel any in-progress recovery key rekey verification operation.",
+					Description: "This clears any progress made and resets the nonce. Unlike a `DELETE` against `sys/rekey-recovery-key/init`, this only resets the current verification operation, not the entire rekey atttempt.",
+				},
+				logical.UpdateOperation: &framework.PathOperation{
+					DisplayAttrs: &framework.DisplayAttributes{
+						OperationVerb: "update",
+					},
+					Callback: b.handleRekeyVerify(true),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"complete": {
+									Type: framework.TypeBool,
+								},
+							},
+						}},
+					},
+					Summary: "Enter a single new key share to progress the rekey verification operation.",
+				},
+			},
+		},
 		{
 			Pattern: "seal$",
 

@@ -292,3 +292,26 @@ func matchErrors(patterns []string, body any) error {
 	}
 	return nil
 }
+
+// pathCapturedRefRegexp matches $name tokens inside paths.
+var pathCapturedRefRegexp = regexp.MustCompile(`\$([A-Za-z][A-Za-z0-9_-]*)`)
+
+// substituteCapturedPath replaces $name tokens in a request path with the
+// named capture slot. Unknown names pass through literally.
+func substituteCapturedPath(path string, capturedData map[string]string) (string, error) {
+	if len(capturedData) == 0 || !strings.Contains(path, "$") {
+		return path, nil
+	}
+	out := path
+	for _, match := range pathCapturedRefRegexp.FindAllStringSubmatch(path, -1) {
+		name := match[1]
+		val, ok := capturedData[name]
+		if !ok {
+			// Unknown names pass through literally so paths that contain
+			// $-prefixed literals are unaffected.
+			continue
+		}
+		out = strings.Replace(out, "$"+name, val, 1)
+	}
+	return out, nil
+}

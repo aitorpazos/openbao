@@ -88,7 +88,14 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 			return "ERROR", 0, err.Error(), captured
 		}
 	}
-	req, err := http.NewRequest(c.Request.Method, strings.TrimRight(target, "/")+c.Request.Path, bytes.NewReader(payload))
+	// Captured values are also substitutable in the request path
+	// (e.g. /v1/identity/entity/id/$ent) so flows that mint IDs can read
+	// them back without inventing fixture constants.
+	reqPath, err := substituteCapturedPath(c.Request.Path, capturedData)
+	if err != nil {
+		return "ERROR", 0, err.Error(), captured
+	}
+	req, err := http.NewRequest(c.Request.Method, strings.TrimRight(target, "/")+reqPath, bytes.NewReader(payload))
 	if err != nil {
 		return "ERROR", 0, err.Error(), captured
 	}

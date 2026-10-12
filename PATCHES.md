@@ -76,6 +76,8 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/activation_flags.go` (new) | +core-level one-time activation-flag storage (ActivationFlagActive / ActivateActivationFlag) | Same as above; activation is one-way per the docs ("Once removed, you cannot un-activate gated features") | — |
 | `internal/vault/logical_system.go` | password-policy create/update: `entropy_source` parameter ("", platform, seal) — seal rejected with 400 ("entropy_source \"seal\" requires entropy augmentation which is not available"); stored on the policy and echoed by read (omitted when empty, matching the docs read sample) | Documented `entropy_source` parameter of the password-policy API (api-docs/system/policies-password, v2.x (latest)); generation itself always uses the platform source on the fork (the only honorable source) | — |
 | `internal/vault/logical_system_paths.go` | +`drbg` field on the `tools/random` path schema | Same as above (the field must exist in the schema for body-form delivery) | — |
+| `internal/vault/logical_system_rekey.go` (new) | Token-authenticated system-backend handlers for rekey/init, rekey/update, rekey/verify (recovery=false) and rekey-recovery-key/init, rekey-recovery-key/update, rekey-recovery-key/verify (recovery=true), mirroring the http-package rekey handlers | The rekey endpoints were only routable through the unauthenticated listener special case (`DisableUnauthedRekeyEndpoints`); token-authenticated access returned 405 ("unsupported operation") and the documented rekey-recovery-key paths returned 404 ("unsupported path"). Vault routes these through the system backend | — |
+| `internal/vault/logical_system_paths.go` | Callbacks wired onto the existing rekey/init, rekey/update, rekey/verify framework paths; +the rekey-recovery-key/init, /update, /verify paths with recovery=true | Same as above; the recovery endpoints return 400 "recovery rekeying not supported" on seals without recovery-key support (dev Shamir), per the docs' "only applicable to seals that support recovery keys" | — |
 | `internal/vault/quotas/quotas.go` | +`EntityID` on the quota Request; +`Manager.EntityGroupingRateQuotas()` flag | Documented identity-based rate-limit quotas (api-docs/system/rate-limit-quotas + guide): group_by entity_then_ip/entity_then_none bucket requests by entity | — |
 | `internal/vault/quotas/quotas_rate_limit.go` | +entity-grouped admission: entity buckets take `rate`, IP (entity_then_ip) / shared-none (entity_then_none) buckets take `secondary_rate` (second limiter store created at initialize) | Same as above; group_by `none` puts all requests in one bucket at the primary rate | — |
 | `internal/vault/core.go` | +`HasEntityGroupingRateQuota()` and `RateLimitEntityIDForToken()` helpers | Same as above; the entity is resolved from the request token only when an entity-grouped quota exists | — |
@@ -353,6 +355,18 @@ Core seams (ledger rows above):
   explicit 400 refusal for seal (entropy augmentation needs an HSM-backed
   seal); specs/entropy/10-password-policies.yaml (8 cases) covers default
   omission, platform echo, seal/invalid rejection and generation.
+- Recovery-key rekey (compat-control-group branch): the documented
+  rekey-recovery-key API was unroutable (404) and the barrier rekey 405'd
+  with a token — both now route through the system backend with the
+  documented contracts. specs/rekey/00-recovery-and-barrier.yaml (18 cases)
+  covers the recovery seal-gating, the init/read/cancel cycle, verification
+  status, key-format validation and the invalid-config error contracts. A
+  full barrier rekey ceremony requires the current barrier key (the
+  harness does not hold it) and is left to operator verification. Also:
+  namespaces identity isolation is verified — entities/groups created with
+  X-Vault-Namespace are invisible at the root and vice versa
+  (specs/namespaces/20-identity-isolation.yaml, 10 cases); the harness now
+  substitutes captured values in request paths, not just bodies.
 - Secrets import activation flag (compat-control-group branch): the
   documented one-time activation endpoint is now implemented alongside the
   existing enable-scim flag; specs/secrets-import/00-activation.yaml (5

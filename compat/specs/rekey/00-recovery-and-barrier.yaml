@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-rekey-and-rekey-recovery-key
+feature: rekey-recovery-key
+source: https://developer.hashicorp.com/vault/api-docs/system/rekey-recovery-key
+source_version: v2.x (latest)
+notes: >-
+  Sources: api-docs/system/rekey-recovery-key (rekey-recovery-key/init
+  read/start/cancel, update, verification, backup) and
+  api-docs/system/rekey (the barrier-key rekey ceremony this recovery flow
+  mirrors). The docs state recovery endpoints are "only applicable to seals
+  that support recovery keys"; on the fork's dev seal (Shamir,
+  RecoveryKeySupported()==false) the recovery endpoints return 400
+  "recovery rekeying not supported" — the honest documented gating. The
+  update endpoint validates the key format before the seal check (mirroring
+  the fork's http handler), so a malformed key reports the format error even
+  on recovery paths. Barrier-key rekey is exercised through
+  init/read/cancel and invalid-parameter contracts (a complete ceremony
+  requires the current barrier key, which the harness does not hold);
+  "required" mirrors the dev seal's threshold (1) and is asserted as a
+  schema field, not a value. Invalid configurations
+  (shares=0, threshold>shares) surface as 500 coded errors with the
+  validation message (observed fork behavior; the docs do not specify the
+  status). Cancel with nothing in progress is an idempotent 204.
+cases:
+  - id: recovery-init-read-unavailable
+    request:
+      method: GET
+      path: /v1/sys/rekey-recovery-key/init
+    expect:
+      status: [400]
+      errors_contain: ["recovery rekeying not supported"]
+  - id: recovery-init-post-unavailable
+    request:
+      method: POST
+      path: /v1/sys/rekey-recovery-key/init
+      body: {secret_shares: 1, secret_threshold: 1}
+    expect:
+      status: [400]
+      errors_contain: ["recovery rekeying not supported"]
+  - id: recovery-init-delete-unavailable
+    request:
+      method: DELETE
+      path: /v1/sys/rekey-recovery-key/init
+    expect:
+      status: [400]
+      errors_contain: ["recovery rekeying not supported"]
+  - id: recovery-verify-read-unavailable
+    request:
+      method: GET
+      path: /v1/sys/rekey-recovery-key/verify
+    expect:
+      status: [400]
+      errors_contain: ["recovery rekeying not supported"]
+  - id: recovery-verify-delete-unavailable
+    request:
+      method: DELETE
+      path: /v1/sys/rekey-recovery-key/verify
+    expect:
+      status: [400]
+      errors_contain: ["recovery rekeying not supported"]
+  - id: recovery-update-bad-key
+    request:
+      method: PUT
+      path: /v1/sys/rekey-recovery-key/update
+      body: {key: zzz}
+    expect:
+      status: [400]
+      errors_contain: ["'key' must be a valid hex or base64 string"]
+  - id: barrier-init-read-clean
+    request:
+      method: GET
+      path: /v1/sys/rekey/init
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [started, t, n, progress, required]
+            properties:
+              started: {type: boolean}
+              t: {type: integer}
+              n: {type: integer}
+              progress: {type: integer}
+              required: {type: integer}
+              pgp_fingerprints: {type: array}
+              backup: {type: boolean}
+              verification_required: {type: boolean}
+      exact: {data.started: false}
+  - id: barrier-init-cancel-reset
+    # Rerun tolerance: clear any rekey left in progress by an earlier
+    # interrupted run before starting a new one.
+    request:
+      method: DELETE
+      path: /v1/sys/rekey/init
+    expect:
+      status: [204]
+  - id: barrier-init-post
+    request:
+      method: POST
+      path: /v1/sys/rekey/init
+      body: {secret_shares: 1, secret_threshold: 1}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [started, nonce, t, n, progress]
+            properties:
+              started: {type: boolean}
+              nonce: {type: string}
+              t: {type: integer}
+              n: {type: integer}
+      exact: {data.started: true, data.n: 1, data.t: 1, data.progress: 0}
+  - id: barrier-init-in-progress
+    request:
+      method: POST
+      path: /v1/sys/rekey/init
+      body: {secret_shares: 3, secret_threshold: 2}
+    expect:
+      status: [400]
+      errors_contain: ["rekey already in progress"]
+  - id: barrier-init-read-in-progress
+    request:
+      method: GET
+      path: /v1/sys/rekey/init
+    expect:
+      status: [200]
+      exact: {data.started: true, data.progress: 0}
+  - id: barrier-verify-read-no-verification
+    # A started (non-verification) rekey exposes a verification status of
+    # started:false with an empty nonce.
+    request:
+      method: GET
+      path: /v1/sys/rekey/verify
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [started, nonce, t, n, progress]
+            properties:
+              started: {type: boolean}
+              nonce: {type: string}
+      exact: {data.started: false, data.nonce: ""}
+  - id: barrier-update-bad-key
+    request:
+      method: PUT
+      path: /v1/sys/rekey/update
+      body: {key: zzz}
+    expect:
+      status: [400]
+      errors_contain: ["'key' must be a valid hex or base64 string"]
+  - id: barrier-init-cancel
+    request:
+      method: DELETE
+      path: /v1/sys/rekey/init
+    expect:
+      status: [204]
+  - id: barrier-init-read-after-cancel
+    request:
+      method: GET
+      path: /v1/sys/rekey/init
+    expect:
+      status: [200]
+      exact: {data.started: false}
+  - id: barrier-init-zero-shares
+    request:
+      method: POST
+      path: /v1/sys/rekey/init
+      body: {secret_shares: 0, secret_threshold: 0}
+    expect:
+      status: [500]
+      errors_contain: ["invalid rekey seal configuration"]
+  - id: barrier-init-threshold-over-shares
+    request:
+      method: POST
+      path: /v1/sys/rekey/init
+      body: {secret_shares: 1, secret_threshold: 2}
+    expect:
+      status: [500]
+      errors_contain: ["invalid rekey seal configuration"]
+  - id: backup-read-empty
+    request:
+      method: GET
+      path: /v1/sys/rekey/recovery-key-backup
+    expect:
+      status: [400]
+      errors_contain: ["no backed-up keys found"]

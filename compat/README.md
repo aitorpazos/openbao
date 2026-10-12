@@ -58,6 +58,10 @@ cases:
 #   capture: {accessor: wrap_info.accessor}   # named slots from dotted response paths
 #   use_captured_token: true         # send slot "token" as X-Vault-Token
 #   use_captured_token: accessor     # send the named slot instead
+#
+# Captured values are also substitutable in the request PATH:
+#   path: /v1/identity/entity/id/$ent
+# Unknown $names pass through literally (same rule as bodies).
 # Body strings beginning with "$" are substituted from the captured slots:
 #   body: {accessor: "$accessor"}    # unknown "$name" is passed through
 #                                    # literally (e.g. regex groups "$1-$2")
