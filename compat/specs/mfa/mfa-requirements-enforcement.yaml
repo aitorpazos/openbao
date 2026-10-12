@@ -43,7 +43,7 @@ cases:
   - id: write-target
     request:
       method: POST
-      path: /v1/kv/data/sr-foo
+      path: /v1/sr-kv/data/sr-foo
       body: {data: {v: "1"}}
     expect:
       status: [200]
@@ -66,7 +66,7 @@ cases:
     request:
       method: PUT
       path: /v1/sys/policies/acl/sr-mfa-all
-      body: {"policy": "path \"kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n  }\n}"}
+      body: {"policy": "path \"sr-kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n  }\n}"}
     expect:
       status: [204]
   - id: read-policy-all
@@ -76,12 +76,12 @@ cases:
     expect:
       status: [200]
       exact:
-        data.policy: "path \"kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n  }\n}"
+        data.policy: "path \"sr-kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n  }\n}"
   - id: create-policy-any
     request:
       method: PUT
       path: /v1/sys/policies/acl/sr-mfa-any
-      body: {"policy": "path \"kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n    any_name_to_proceed = true\n  }\n}"}
+      body: {"policy": "path \"sr-kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n    any_name_to_proceed = true\n  }\n}"}
     expect:
       status: [204]
   - id: create-user
@@ -114,7 +114,7 @@ cases:
     use_captured_token: true
     request:
       method: GET
-      path: /v1/kv/data/sr-foo
+      path: /v1/sr-kv/data/sr-foo
     expect:
       status: [403]
       errors_contain:
@@ -125,7 +125,7 @@ cases:
     use_captured_token: true
     request:
       method: GET
-      path: /v1/kv/data/sr-foo
+      path: /v1/sr-kv/data/sr-foo
       headers: {X-Vault-MFA: "sr-totp:123456"}
     expect:
       status: [403]
@@ -137,7 +137,7 @@ cases:
     use_captured_token: true
     request:
       method: GET
-      path: /v1/kv/data/sr-foo
+      path: /v1/sr-kv/data/sr-foo
       headers: {X-Vault-MFA: "nope:123456"}
     expect:
       status: [403]
@@ -162,7 +162,7 @@ cases:
     use_captured_token: true
     request:
       method: GET
-      path: /v1/kv/data/sr-foo
+      path: /v1/sr-kv/data/sr-foo
     expect:
       status: [403]
       errors_contain:
@@ -172,7 +172,7 @@ cases:
     use_captured_token: true
     request:
       method: GET
-      path: /v1/kv/data/sr-foo
+      path: /v1/sr-kv/data/sr-foo
       headers: {X-Vault-MFA: "sr-totp:123456"}
     expect:
       status: [403]
