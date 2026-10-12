@@ -81,6 +81,8 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/policy/policy.go` | +`mfa_requirements` block parsing in ACL path stanzas (`mfa_method_names`, `any_name_to_proceed`), splitting into any/all name lists at parse time; `MFARequirement` type carried into ACLPermissions and Clone | Vault v1.11+ policies use `mfa_requirements` blocks for step-up MFA; the fork rejected the key with "invalid key" and could not express step-up requirements in the documented syntax. The fork's `mfa_methods` attr form remains supported | — |
 | `internal/vault/policy/acl.go` | ACLResults gains MFARequirements; permissions merge appends requirement lists; results expose them to the core | Same as above | — |
 | `internal/vault/core.go` | Step-up enforcement branch: `any_name_to_proceed` requires one validated method from the list, otherwise all listed methods must validate; errors surface as 403 like the mfa_methods form | Same as above; root tokens bypass as before | — |
+| `internal/vault/logical_system_billing.go` (new) | The documented /sys/billing surfaces as a license-free compatibility contract: GET/POST /sys/billing/config (retention 13-72, default 37, the documented increase warning verbatim, decrease silent), GET /sys/billing/overview (current-month zeroed report with the eleven documented usage metrics in the documented order and type lists), GET /sys/billing/certificates (per-month YYYY-MM counts with the documented not-found error shape) | The census flagged the billing family as not covered. OpenBao does not collect usage-based-licensing activity, so the reports are schema-shaped and honest rather than fabricated: zeros/empty with an explicit warning, matching the license-usage lane's established pattern. Root namespace only per the docs' restricted-endpoint notes | — |
+| `compat/harness/validate.go` | Dotted paths in exact/contains/absent/capture now resolve numeric array indices; contains keys support a "[].field" projection for asserting one field across object-array entries | Billing month reports and other schema-rich arrays could not be asserted without array-index resolution | — |
 | `internal/vault/quotas/quotas.go` | +`EntityID` on the quota Request; +`Manager.EntityGroupingRateQuotas()` flag | Documented identity-based rate-limit quotas (api-docs/system/rate-limit-quotas + guide): group_by entity_then_ip/entity_then_none bucket requests by entity | — |
 | `internal/vault/quotas/quotas_rate_limit.go` | +entity-grouped admission: entity buckets take `rate`, IP (entity_then_ip) / shared-none (entity_then_none) buckets take `secondary_rate` (second limiter store created at initialize) | Same as above; group_by `none` puts all requests in one bucket at the primary rate | — |
 | `internal/vault/core.go` | +`HasEntityGroupingRateQuota()` and `RateLimitEntityIDForToken()` helpers | Same as above; the entity is resolved from the request token only when an entity-grouped quota exists | — |
@@ -358,6 +360,13 @@ Core seams (ledger rows above):
   explicit 400 refusal for seal (entropy augmentation needs an HSM-backed
   seal); specs/entropy/10-password-policies.yaml (8 cases) covers default
   omission, platform echo, seal/invalid rejection and generation.
+- Billing surfaces (compat-control-group branch): the documented
+  /sys/billing/{config,overview,certificates} routes are implemented as
+  honest zero/empty compatibility reports with the documented schemas,
+  retention warning contract and root-namespace restriction
+  (specs/billing/00-billing.yaml, 21 cases). The harness now resolves
+  array indices in dotted assertions and projects contains keys through
+  "[].field".
 - Step-up MFA mfa_requirements (compat-control-group branch): ACL policies
   now accept the documented mfa_requirements block (any/all semantics),
   propagate through the ACL into the core, and enforce with 403 on unmet

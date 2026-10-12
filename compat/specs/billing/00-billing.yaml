@@ -1,0 +1,235 @@
+# SPDX-License-Identifier: MPL-2.0
+api: sys-billing
+feature: billing
+source: https://developer.hashicorp.com/vault/api-docs/system/billing/overview
+source_version: v2.x (latest)
+notes: >-
+  Sources: api-docs/system/billing/overview, .../billing/config,
+  .../billing/certificates (all v2.x latest). Overview and config are
+  documented as restricted to the root (overview: "root or administrative")
+  namespace; the fork restricts all three surfaces to the root namespace.
+  OpenBao does not collect usage-based-licensing activity, so reports are
+  schema-shaped but zero/empty with an explicit warning; certificate
+  months carry the documented per-month not-found error shape
+  ("certificate counts not found for YYYY-MM") rather than fabricated
+  counts. Retention config: 13-72 months inclusive, documented default 37;
+  increasing the retention period yields the documented verbatim warning;
+  decreasing or maintaining yields none. The value is persisted across
+  requests within a server lifetime; the final case restores the default
+  so the suite is rerun-safe on a fresh dev server. Overview reports only
+  the current month (no historical data was ever accumulated); a requested
+  range that excludes the current month yields an empty months list. The
+  exact retention default assertion assumes the suite runs on a fresh
+  server (full-suite runs restart the dev server).
+cases:
+  - id: config-read-default
+    request:
+      method: GET
+      path: /v1/sys/billing/config
+    expect:
+      status: [200]
+      exact: {data.retention_months: 37}
+  - id: config-update-retention
+    request:
+      method: POST
+      path: /v1/sys/billing/config
+      body: {retention_months: 48}
+    expect:
+      status: [200]
+      exact: {data.retention_months: 48}
+  - id: config-read-after-update
+    request:
+      method: GET
+      path: /v1/sys/billing/config
+    expect:
+      status: [200]
+      exact: {data.retention_months: 48}
+  - id: config-increase-warns
+    request:
+      method: POST
+      path: /v1/sys/billing/config
+      body: {retention_months: 60}
+    expect:
+      status: [200]
+      exact:
+        data.retention_months: 60
+        warnings.0: "Retention period increased from 48 to 60 months. Historical data will only be available for months within the previous retention period. Data for months older than 48 months ago will not be restored."
+  - id: config-decrease-no-warning
+    request:
+      method: POST
+      path: /v1/sys/billing/config
+      body: {retention_months: 37}
+    expect:
+      status: [200]
+      exact: {data.retention_months: 37}
+      absent: [warnings]
+  - id: config-below-minimum
+    request:
+      method: POST
+      path: /v1/sys/billing/config
+      body: {retention_months: 5}
+    expect:
+      status: [400]
+      errors_contain: ["retention_months must be between 13 and 72"]
+  - id: config-above-maximum
+    request:
+      method: POST
+      path: /v1/sys/billing/config
+      body: {retention_months: 73}
+    expect:
+      status: [400]
+      errors_contain: ["retention_months must be between 13 and 72"]
+  - id: config-missing-required
+    request:
+      method: POST
+      path: /v1/sys/billing/config
+      body: {}
+    expect:
+      status: [400]
+      errors_contain: ["retention_months is required"]
+  - id: overview-default
+    request:
+      method: GET
+      path: /v1/sys/billing/overview
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [months]
+            properties:
+              months:
+                type: array
+                items:
+                  type: object
+                  required: [month, updated_at, usage_metrics]
+                  properties:
+                    month: {type: string}
+                    updated_at: {type: string}
+                    usage_metrics:
+                      type: array
+                      items:
+                        type: object
+                        required: [metric_name, metric_data]
+                        properties:
+                          metric_name: {type: string}
+                          metric_data: {type: object}
+      contains:
+        data.months.0.usage_metrics[].metric_name: [static_secrets, dynamic_roles, auto_rotated_roles, kmip, pki_units, ssh_units, external_plugins, data_protection_calls, managed_keys, id_token_units, external_ca_pki_units]
+  - id: overview-range-excluding-current
+    request:
+      method: GET
+      path: /v1/sys/billing/overview?start_month=2025-12&end_month=2026-01
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [months]
+            properties:
+              months: {type: array}
+  - id: overview-bad-month
+    request:
+      method: GET
+      path: /v1/sys/billing/overview?start_month=2025-1
+    expect:
+      status: [400]
+      errors_contain: ["start_month must use the YYYY-MM format"]
+  - id: overview-inverted-range
+    request:
+      method: GET
+      path: /v1/sys/billing/overview?start_month=2026-02&end_month=2026-01
+    expect:
+      status: [400]
+      errors_contain: ["start_month must not be after end_month"]
+  - id: certificates-range
+    request:
+      method: GET
+      path: /v1/sys/billing/certificates?start_time=2025-10&end_time=2025-11
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [months]
+            properties:
+              months:
+                type: array
+                items:
+                  type: object
+                  required: [timestamp, counts, error]
+                  properties:
+                    timestamp: {type: string}
+                    counts:
+                      type: object
+                      required: [issued_certificates]
+                      properties:
+                        issued_certificates: {type: integer}
+                    error: {type: string}
+      exact:
+        data.months.0.timestamp: "2025-10"
+        data.months.0.error: "certificate counts not found for 2025-10"
+        data.months.1.timestamp: "2025-11"
+  - id: certificates-one-sided
+    request:
+      method: GET
+      path: /v1/sys/billing/certificates?end_time=2025-11
+    expect:
+      status: [400]
+      errors_contain: ["start_time and end_time must be provided together"]
+  - id: certificates-bad-month
+    request:
+      method: GET
+      path: /v1/sys/billing/certificates?start_time=2025-10&end_time=nope
+    expect:
+      status: [400]
+      errors_contain: ["end_time must use the YYYY-MM format"]
+  - id: certificates-inverted-range
+    request:
+      method: GET
+      path: /v1/sys/billing/certificates?start_time=2025-11&end_time=2025-10
+    expect:
+      status: [400]
+      errors_contain: ["start_time must not be after end_time"]
+  - id: ns-setup
+    request:
+      method: POST
+      path: /v1/sys/namespaces/sr-billing-ns
+    expect:
+      status: [200, 204]
+  - id: config-denied-in-namespace
+    request:
+      method: GET
+      path: /v1/sys/billing/config
+      headers: {X-Vault-Namespace: sr-billing-ns}
+    expect:
+      status: [403]
+  - id: overview-denied-in-namespace
+    request:
+      method: GET
+      path: /v1/sys/billing/overview
+      headers: {X-Vault-Namespace: sr-billing-ns}
+    expect:
+      status: [403]
+  - id: certificates-denied-in-namespace
+    request:
+      method: GET
+      path: /v1/sys/billing/certificates
+      headers: {X-Vault-Namespace: sr-billing-ns}
+    expect:
+      status: [403]
+  - id: cleanup-ns
+    request:
+      method: DELETE
+      path: /v1/sys/namespaces/sr-billing-ns
+    expect:
+      status: [200, 204, 400]

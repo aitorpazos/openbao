@@ -163,6 +163,7 @@ func NewSystemBackend(core *Core, logger log.Logger) *SystemBackend {
 	b.Paths = append(b.Paths, b.capabilitiesPaths()...)
 	b.Paths = append(b.Paths, b.internalPaths()...)
 	b.Paths = append(b.Paths, b.licenseUsagePaths()...)
+	b.Paths = append(b.Paths, b.billingPaths()...)
 	b.Paths = append(b.Paths, b.pprofPaths()...)
 	b.Paths = append(b.Paths, b.remountPaths()...)
 	b.Paths = append(b.Paths, b.metricsPath())

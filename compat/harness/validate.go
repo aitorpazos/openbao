@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -142,19 +143,46 @@ func validate(s map[string]any, v any, path string) error {
 	}
 	return nil
 }
+
+// descendSegment steps one dotted-path segment. An all-digit segment
+// indexes an array; any other segment indexes an object by key.
+func descendSegment(cur any, seg string) (any, bool) {
+	if n, err := strconv.Atoi(seg); err == nil {
+		arr, ok := cur.([]any)
+		if !ok {
+			return nil, false
+		}
+		if n < 0 || n >= len(arr) {
+			return nil, false
+		}
+		return arr[n], true
+	}
+	obj, ok := cur.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	v, exists := obj[seg]
+	if !exists {
+		return nil, false
+	}
+	return v, true
+}
+
 func matchExact(exact map[string]any, body any) error {
 	for _, key := range keys(exact) {
 		v := body
 		for _, part := range strings.Split(key, ".") {
-			obj, ok := v.(map[string]any)
+			next, ok := descendSegment(v, part)
 			if !ok {
-				return fmt.Errorf("exact %s: not an object", key)
-			}
-			var exists bool
-			v, exists = obj[part]
-			if !exists {
+				if _, isArr := v.([]any); isArr {
+					return fmt.Errorf("exact %s: missing index %s", key, part)
+				}
+				if _, isObj := v.(map[string]any); !isObj {
+					return fmt.Errorf("exact %s: not an object", key)
+				}
 				return fmt.Errorf("exact %s: missing", key)
 			}
+			v = next
 		}
 		if !reflect.DeepEqual(v, exact[key]) {
 			return fmt.Errorf("exact %s: mismatch", key)
@@ -165,20 +193,45 @@ func matchExact(exact map[string]any, body any) error {
 
 // matchContains asserts that, at each dotted key, the response value is an
 // array containing every listed entry (list membership without ordering or
-// equality on the whole list).
+// equality on the whole list). A key ending with "[].field" first projects
+// each array element's named field, so object entries can be asserted by
+// one of their fields (e.g. data.months.0.usage_metrics[].metric_name).
 func matchContains(contains map[string]any, body any) error {
 	for _, key := range keys(contains) {
+		resolveKey := key
+		projection := ""
+		if idx := strings.Index(key, "[]."); idx >= 0 {
+			resolveKey = key[:idx]
+			projection = key[idx+3:]
+		}
 		v := body
-		for _, part := range strings.Split(key, ".") {
-			obj, ok := v.(map[string]any)
+		for _, part := range strings.Split(resolveKey, ".") {
+			next, ok := descendSegment(v, part)
 			if !ok {
-				return fmt.Errorf("contains %s: not an object", key)
-			}
-			var exists bool
-			v, exists = obj[part]
-			if !exists {
+				if _, isArr := v.([]any); isArr {
+					return fmt.Errorf("contains %s: missing index %s", key, part)
+				}
+				if _, isObj := v.(map[string]any); !isObj {
+					return fmt.Errorf("contains %s: not an object", key)
+				}
 				return fmt.Errorf("contains %s: missing", key)
 			}
+			v = next
+		}
+		if projection != "" {
+			arr, ok := v.([]any)
+			if !ok {
+				return fmt.Errorf("contains %s: [] projection requires an array", key)
+			}
+			projected := make([]any, len(arr))
+			for i, elem := range arr {
+				fieldVal, ok := descendSegment(elem, projection)
+				if !ok {
+					return fmt.Errorf("contains %s: element %d missing projection field %s", key, i, projection)
+				}
+				projected[i] = fieldVal
+			}
+			v = projected
 		}
 		arr, ok := v.([]any)
 		if !ok {
@@ -214,15 +267,11 @@ func matchContains(contains map[string]any, body any) error {
 func lookupPath(body any, path string) (any, bool) {
 	cur := body
 	for _, seg := range strings.Split(path, ".") {
-		obj, ok := cur.(map[string]any)
+		next, ok := descendSegment(cur, seg)
 		if !ok {
 			return nil, false
 		}
-		v, exists := obj[seg]
-		if !exists {
-			return nil, false
-		}
-		cur = v
+		cur = next
 	}
 	return cur, true
 }

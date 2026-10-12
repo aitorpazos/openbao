@@ -59,6 +59,10 @@ cases:
 #   use_captured_token: true         # send slot "token" as X-Vault-Token
 #   use_captured_token: accessor     # send the named slot instead
 #
+# Dotted paths in exact/contains/capture resolve array indices too
+# (data.months.0.month), and contains keys support a "[].field" projection
+# (data.months.0.usage_metrics[].metric_name asserts metric names only).
+#
 # Captured values are also substitutable in the request PATH:
 #   path: /v1/identity/entity/id/$ent
 # Unknown $names pass through literally (same rule as bodies).
