@@ -14,7 +14,11 @@ notes: >-
   disagree on maturity — the overview's Beta label is used here. The
   feature is only activated (not exercised): actual import runs are a
   separate workflow. Re-activation is accepted as an idempotent no-op;
-  the docs do not specify repeated-activation behavior.
+  the docs do not specify repeated-activation behavior. Activation is
+  one-way with no documented deactivation, so read-pre-activation
+  requires a fresh target (never-activated flag state); on reruns
+  secrets-import lists under activated instead. Verified live: a fresh
+  server lists secrets-import in unactivated.
 cases:
   - id: read-pre-activation
     request:
