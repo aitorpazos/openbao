@@ -9,8 +9,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -551,15 +553,26 @@ func (b *SystemBackend) handleStorageRaftAutopilotConfigRead() framework.Operati
 			return nil, err
 		}
 
+		// The documented GET configuration sample response is a top-level
+		// JSON object (no "data" envelope); emit it through the raw-response
+		// channel.
+		body, err := json.Marshal(map[string]any{
+			"cleanup_dead_servers":               config.CleanupDeadServers,
+			"last_contact_threshold":             config.LastContactThreshold.String(),
+			"dead_server_last_contact_threshold": config.DeadServerLastContactThreshold.String(),
+			"max_trailing_logs":                  config.MaxTrailingLogs,
+			"min_quorum":                         config.MinQuorum,
+			"server_stabilization_time":          config.ServerStabilizationTime.String(),
+			"disable_upgrade_migration":          stored.DisableUpgradeMigration,
+		})
+		if err != nil {
+			return nil, err
+		}
 		return &logical.Response{
 			Data: map[string]any{
-				"cleanup_dead_servers":               config.CleanupDeadServers,
-				"last_contact_threshold":             config.LastContactThreshold.String(),
-				"dead_server_last_contact_threshold": config.DeadServerLastContactThreshold.String(),
-				"max_trailing_logs":                  config.MaxTrailingLogs,
-				"min_quorum":                         config.MinQuorum,
-				"server_stabilization_time":          config.ServerStabilizationTime.String(),
-				"disable_upgrade_migration":          stored.DisableUpgradeMigration,
+				logical.HTTPContentType: "application/json",
+				logical.HTTPRawBody:     body,
+				logical.HTTPStatusCode:  http.StatusOK,
 			},
 		}, nil
 	}

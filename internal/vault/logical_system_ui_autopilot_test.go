@@ -5,6 +5,7 @@ package vault
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/openbao/openbao/sdk/v2/framework"
@@ -55,7 +56,15 @@ func TestAutopilotDisableUpgradeMigrationConfiguration(t *testing.T) {
 		t.Helper()
 		resp, err := b.handleStorageRaftAutopilotConfigRead()(ctx, &logical.Request{}, nil)
 		require.NoError(t, err)
-		require.Equal(t, want, resp.Data["disable_upgrade_migration"])
+		// The documented GET response is a top-level JSON object emitted
+		// through the raw-body channel, not a "data" envelope.
+		require.Equal(t, 200, resp.Data[logical.HTTPStatusCode])
+		require.Equal(t, "application/json", resp.Data[logical.HTTPContentType])
+		bodyRaw, ok := resp.Data[logical.HTTPRawBody].([]byte)
+		require.True(t, ok)
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(bodyRaw, &decoded))
+		require.Equal(t, want, decoded["disable_upgrade_migration"])
 	}
 	read(false)
 	for _, value := range []bool{true, false} {
