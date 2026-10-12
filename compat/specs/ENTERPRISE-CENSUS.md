@@ -25,19 +25,23 @@ Also added: specs for the DR operation-token ceremony route/schema surface
 (implementation belongs to the replication agent's lane; 9 cases remain
 FEATURE_ABSENT pending those routes).
 
-Live full-suite state on an in-memory dev server (compat-harness, latest
-branch tip): **966 PASS / 39 FEATURE_ABSENT / 25 FAIL / 27 SKIP**. The FAILs
-decompose as: 16 SCIM fixture-contract cases (clear when run with the
-documented SCIM-actor token — verified 20/20; the suite's shared token cannot
-be the registered actor), 3 audit cases requiring the
-`unsafe-allow-api-audit-creation` dev flag, 3 recovery-key-rekey fixture
+Live full-suite state on an in-memory dev server (compat-harness, branch
+tip 0ad153f900, 2026-10-12): **1060 PASS / 38 FEATURE_ABSENT / 22 FAIL /
+26 SKIP**. The FAILs decompose as: the 15-case SCIM family (SCIM is not
+activated without the fixture; clear when run with the documented SCIM
+fixture bootstrap — verified separately), 3 recovery-key-rekey fixture
 gates (deliberate: the fixture-only suites FAIL their gate on non-fixture
-targets so the rest SKIP), 1 documented asynchronous namespace-deletion
-fixture race (direct retry succeeds), and SLH-DSA create — a documented
-clean-room deferral, not a spec error. FEATURE_ABSENT decomposes as:
-raft-integrated-storage prerequisites (autosnapshot 16, snapshot-load 5,
-autopilot config 6, redundancy state 1), the 9 DR operation-token routes,
-and 2 rekey-recovery-key probes on the non-recovery-sealed dev target.
+targets so the rest SKIP), namespaces-ui parent-with-children deletion
+(observed 400 for a documented conditional operation), pki-transit-ent
+SLH-DSA create (documented clean-room deferral — no in-tree FIPS 205
+implementation), and secrets-import pre-activation read shape. SKIP
+growth reflects the fixture- and mock-dependent cases that skip when
+their provisioning is absent (rekey verification/backup fixtures, CIEPS
+mock-mode scenarios documented in notes.md). FEATURE_ABSENT decomposes
+as: raft-integrated-storage prerequisites (autosnapshot 16, snapshot-load
+5, autopilot config 6, redundancy state 1), the 9 DR operation-token
+routes, and 2 rekey-recovery-key probes on the non-recovery-sealed dev
+target.
 
 Remaining documented-deferral families (Medium priority per the census):
 KMIP listener/CA/client fixtures, performance-standby/consistency
