@@ -26,8 +26,8 @@ Also added: specs for the DR operation-token ceremony route/schema surface
 FEATURE_ABSENT pending those routes).
 
 Live full-suite state on an in-memory dev server (compat-harness, branch
-tip 0ad153f900, 2026-10-12): **1060 PASS / 38 FEATURE_ABSENT / 22 FAIL /
-26 SKIP**. The FAILs decompose as: the 15-case SCIM family (SCIM is not
+tip 0ad153f900, 2026-10-12, fresh in-memory state): **1061 PASS /
+38 FEATURE_ABSENT / 21 FAIL / 26 SKIP**. The FAILs decompose as: the 15-case SCIM family (SCIM is not
 activated without the fixture; clear when run with the documented SCIM
 fixture bootstrap — verified separately), 3 recovery-key-rekey fixture
 gates (deliberate: the fixture-only suites FAIL their gate on non-fixture
