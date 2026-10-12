@@ -52,7 +52,10 @@ func (b *SystemBackend) handleRekeyInit(recovery bool) framework.OperationFunc {
 			}
 			return b.rekeyInitStatus(ctx, recovery)
 		case logical.DeleteOperation:
-			if err := b.Core.RekeyCancel(recovery); err != nil {
+			// The documented cancel API accepts the nonce in the body or as
+			// a query parameter; the system backend only sees the body. It
+			// is required for recent cancellations (see RekeyCancel).
+			if err := b.Core.RekeyCancel(recovery, data.Get("nonce").(string)); err != nil {
 				return nil, err
 			}
 			return nil, nil

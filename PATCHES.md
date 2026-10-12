@@ -78,6 +78,9 @@ NOT an additive new package is recorded here. Additive new packages
 | `internal/vault/logical_system_paths.go` | +`drbg` field on the `tools/random` path schema | Same as above (the field must exist in the schema for body-form delivery) | — |
 | `internal/vault/logical_system_rekey.go` (new) | Token-authenticated system-backend handlers for rekey/init, rekey/update, rekey/verify (recovery=false) and rekey-recovery-key/init, rekey-recovery-key/update, rekey-recovery-key/verify (recovery=true), mirroring the http-package rekey handlers | The rekey endpoints were only routable through the unauthenticated listener special case (`DisableUnauthedRekeyEndpoints`); token-authenticated access returned 405 ("unsupported operation") and the documented rekey-recovery-key paths returned 404 ("unsupported path"). Vault routes these through the system backend | — |
 | `internal/vault/logical_system_paths.go` | Callbacks wired onto the existing rekey/init, rekey/update, rekey/verify framework paths; +the rekey-recovery-key/init, /update, /verify paths with recovery=true | Same as above; the recovery endpoints return 400 "recovery rekeying not supported" on seals without recovery-key support (dev Shamir), per the docs' "only applicable to seals that support recovery keys" | — |
+| `internal/vault/policy/policy.go` | +`mfa_requirements` block parsing in ACL path stanzas (`mfa_method_names`, `any_name_to_proceed`), splitting into any/all name lists at parse time; `MFARequirement` type carried into ACLPermissions and Clone | Vault v1.11+ policies use `mfa_requirements` blocks for step-up MFA; the fork rejected the key with "invalid key" and could not express step-up requirements in the documented syntax. The fork's `mfa_methods` attr form remains supported | — |
+| `internal/vault/policy/acl.go` | ACLResults gains MFARequirements; permissions merge appends requirement lists; results expose them to the core | Same as above | — |
+| `internal/vault/core.go` | Step-up enforcement branch: `any_name_to_proceed` requires one validated method from the list, otherwise all listed methods must validate; errors surface as 403 like the mfa_methods form | Same as above; root tokens bypass as before | — |
 | `internal/vault/quotas/quotas.go` | +`EntityID` on the quota Request; +`Manager.EntityGroupingRateQuotas()` flag | Documented identity-based rate-limit quotas (api-docs/system/rate-limit-quotas + guide): group_by entity_then_ip/entity_then_none bucket requests by entity | — |
 | `internal/vault/quotas/quotas_rate_limit.go` | +entity-grouped admission: entity buckets take `rate`, IP (entity_then_ip) / shared-none (entity_then_none) buckets take `secondary_rate` (second limiter store created at initialize) | Same as above; group_by `none` puts all requests in one bucket at the primary rate | — |
 | `internal/vault/core.go` | +`HasEntityGroupingRateQuota()` and `RateLimitEntityIDForToken()` helpers | Same as above; the entity is resolved from the request token only when an entity-grouped quota exists | — |
@@ -355,6 +358,14 @@ Core seams (ledger rows above):
   explicit 400 refusal for seal (entropy augmentation needs an HSM-backed
   seal); specs/entropy/10-password-policies.yaml (8 cases) covers default
   omission, platform echo, seal/invalid rejection and generation.
+- Step-up MFA mfa_requirements (compat-control-group branch): ACL policies
+  now accept the documented mfa_requirements block (any/all semantics),
+  propagate through the ACL into the core, and enforce with 403 on unmet
+  requirements. specs/mfa/mfa-requirements-enforcement.yaml (22 cases)
+  covers policy acceptance/echo, all/any enforcement denials, the
+  passcode/enrollment/credential-slot error contracts, and cleanup. The
+  positive passcode path needs an enrolled entity plus a live TOTP code the
+  harness cannot generate; left to operator verification.
 - Recovery-key rekey (compat-control-group branch): the documented
   rekey-recovery-key API was unroutable (404) and the barrier rekey 405'd
   with a token — both now route through the system backend with the

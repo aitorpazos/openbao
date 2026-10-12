@@ -777,6 +777,10 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 					Type:        framework.TypeBool,
 					Description: "Turns on verification functionality",
 				},
+				"nonce": {
+					Type:        framework.TypeString,
+					Description: "Specifies the nonce of the rekey operation.",
+				},
 			},
 
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -1150,6 +1154,10 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 				"require_verification": {
 					Type:        framework.TypeBool,
 					Description: "Turns on verification functionality",
+				},
+				"nonce": {
+					Type:        framework.TypeString,
+					Description: "Specifies the nonce of the rekey operation.",
 				},
 			},
 

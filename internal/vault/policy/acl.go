@@ -57,6 +57,7 @@ type ACLResults struct {
 	RootPrivs              bool
 	IsRoot                 bool
 	MFAMethods             []string
+	MFARequirements        []*MFARequirement
 	CapabilitiesBitmap     uint32
 	GrantingPolicies       []logical.PolicyInfo
 	ResponseKeysFilterPath string
@@ -265,6 +266,10 @@ func NewACL(ctx context.Context, policies []*Policy) (*ACL, error) {
 				existingPerms.MFAMethods = strutil.RemoveDuplicates(existingPerms.MFAMethods, false)
 			}
 
+			if len(pc.Permissions.MFARequirements) > 0 {
+				existingPerms.MFARequirements = append(existingPerms.MFARequirements, pc.Permissions.MFARequirements...)
+			}
+
 			// Lowest set pagination limit wins.
 			if pc.Permissions.PaginationLimit > 0 {
 				if existingPerms.PaginationLimit <= 0 || pc.Permissions.PaginationLimit < existingPerms.PaginationLimit {
@@ -448,6 +453,7 @@ CHECK:
 	}
 
 	ret.MFAMethods = permissions.MFAMethods
+	ret.MFARequirements = permissions.MFARequirements
 
 	var grantingPolicies []logical.PolicyInfo
 	operationAllowed := false

@@ -20,7 +20,12 @@ notes: >-
   schema field, not a value. Invalid configurations
   (shares=0, threshold>shares) surface as 500 coded errors with the
   validation message (observed fork behavior; the docs do not specify the
-  status). Cancel with nothing in progress is an idempotent 204.
+  status: an earlier build reported these as 500; the current contract is 400.
+  Cancel of a recently initialized operation requires the operation's nonce;
+  the system backend observes DELETE parameters only as query values, so the
+  nonce travels in the query string (the documented API accepts it in the
+  body too, which the http-package mux handler honors). Cancel with nothing
+  in progress is an idempotent 204.
 cases:
   - id: recovery-init-read-unavailable
     request:
@@ -66,7 +71,10 @@ cases:
     expect:
       status: [400]
       errors_contain: ["'key' must be a valid hex or base64 string"]
-  - id: barrier-init-read-clean
+  - id: barrier-init-reset-read
+    # Rerun tolerance: an interrupted earlier run may have left a rekey in
+    # progress; capture its nonce (empty when idle) so the reset below can
+    # cancel even a recent attempt.
     request:
       method: GET
       path: /v1/sys/rekey/init
@@ -88,15 +96,21 @@ cases:
               pgp_fingerprints: {type: array}
               backup: {type: boolean}
               verification_required: {type: boolean}
-      exact: {data.started: false}
+    capture:
+      reset_nonce: data.nonce
   - id: barrier-init-cancel-reset
-    # Rerun tolerance: clear any rekey left in progress by an earlier
-    # interrupted run before starting a new one.
     request:
       method: DELETE
-      path: /v1/sys/rekey/init
+      path: /v1/sys/rekey/init?nonce=$reset_nonce
     expect:
       status: [204]
+  - id: barrier-init-read-clean
+    request:
+      method: GET
+      path: /v1/sys/rekey/init
+    expect:
+      status: [200]
+      exact: {data.started: false}
   - id: barrier-init-post
     request:
       method: POST
@@ -117,6 +131,8 @@ cases:
               t: {type: integer}
               n: {type: integer}
       exact: {data.started: true, data.n: 1, data.t: 1, data.progress: 0}
+    capture:
+      nonce: data.nonce
   - id: barrier-init-in-progress
     request:
       method: POST
@@ -159,10 +175,24 @@ cases:
     expect:
       status: [400]
       errors_contain: ["'key' must be a valid hex or base64 string"]
-  - id: barrier-init-cancel
+  - id: barrier-init-cancel-recent-requires-nonce
     request:
       method: DELETE
       path: /v1/sys/rekey/init
+    expect:
+      status: [400]
+      errors_contain: ["the nonce must be provided to cancel a rekey"]
+  - id: barrier-init-cancel-wrong-nonce
+    request:
+      method: DELETE
+      path: /v1/sys/rekey/init?nonce=00000000-0000-0000-0000-000000000000
+    expect:
+      status: [400]
+      errors_contain: ["the provided nonce does not match the current rekey nonce"]
+  - id: barrier-init-cancel
+    request:
+      method: DELETE
+      path: /v1/sys/rekey/init?nonce=$nonce
     expect:
       status: [204]
   - id: barrier-init-read-after-cancel
@@ -178,7 +208,7 @@ cases:
       path: /v1/sys/rekey/init
       body: {secret_shares: 0, secret_threshold: 0}
     expect:
-      status: [500]
+      status: [400]
       errors_contain: ["invalid rekey seal configuration"]
   - id: barrier-init-threshold-over-shares
     request:
@@ -186,7 +216,7 @@ cases:
       path: /v1/sys/rekey/init
       body: {secret_shares: 1, secret_threshold: 2}
     expect:
-      status: [500]
+      status: [400]
       errors_contain: ["invalid rekey seal configuration"]
   - id: backup-read-empty
     request:

@@ -1,0 +1,209 @@
+# SPDX-License-Identifier: MPL-2.0
+api: mfa-stepup-requirements
+feature: mfa-stepup
+source: https://developer.hashicorp.com/vault/docs/enterprise/mfa
+source_version: v2.x (latest)
+notes: >-
+  Sources: the Vault Enterprise MFA overview (step-up MFA, ACL/Sentinel
+  policy enforcement) and the policy syntax documentation for
+  `mfa_requirements` blocks
+  (https://developer.hashicorp.com/vault/docs/concepts/policies#mfa-requirements).
+  The block takes `mfa_method_names` (list) and `any_name_to_proceed`
+  (bool; when true, validating any single method from the list is
+  sufficient; when false or omitted, every listed method must validate).
+  Credentials arrive in X-Vault-MFA headers in the documented
+  `mfa_method_name[:key[=value]]` format, where the method name selects the
+  credential slot. The positive passcode path needs an enrolled entity and
+  a live TOTP code, which the harness cannot generate; this suite covers
+  the deterministic enforcement surface: policy acceptance, policy read
+  echo, token with an unmet requirement being denied (403), the specific
+  passcode/enrollment/credential-slot error contracts, and that a header
+  credential under an unmatched method name does not satisfy the
+  requirement. Errors surface alongside "permission denied" because denial
+  and the MFA failure are appended to the same error set (observed
+  fork behavior, matching the mfa_methods denial shape). The totp method
+  ties to the userpass accessor; userpass enablement is tolerant of an
+  already-enabled mount because other suites in a full run may enable it
+  first. Cleanup leaves userpass enabled on purpose.
+cases:
+  - id: mount-setup
+    request:
+      method: POST
+      path: /v1/sys/mounts/sr-kv
+      body: {type: kv, options: {version: 2}}
+    expect:
+      status: [204, 400]
+  - id: enable-userpass
+    request:
+      method: POST
+      path: /v1/sys/auth/userpass
+      body: {type: userpass}
+    expect:
+      status: [204, 400]
+  - id: write-target
+    request:
+      method: POST
+      path: /v1/kv/data/sr-foo
+      body: {data: {v: "1"}}
+    expect:
+      status: [200]
+  - id: read-auth-accessor
+    request:
+      method: GET
+      path: /v1/sys/auth
+    expect:
+      status: [200]
+    capture:
+      accessor: data.userpass/.accessor
+  - id: create-totp-method
+    request:
+      method: POST
+      path: /v1/sys/mfa/method/totp/sr-totp
+      body: {mount_accessor: $accessor, issuer: example.com, algorithm: SHA1, digits: 6, period: 30}
+    expect:
+      status: [204]
+  - id: create-policy-all
+    request:
+      method: PUT
+      path: /v1/sys/policies/acl/sr-mfa-all
+      body: {"policy": "path \"kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n  }\n}"}
+    expect:
+      status: [204]
+  - id: read-policy-all
+    request:
+      method: GET
+      path: /v1/sys/policies/acl/sr-mfa-all
+    expect:
+      status: [200]
+      exact:
+        data.policy: "path \"kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n  }\n}"
+  - id: create-policy-any
+    request:
+      method: PUT
+      path: /v1/sys/policies/acl/sr-mfa-any
+      body: {"policy": "path \"kv/data/*\" {\n  capabilities = [\"read\"]\n  mfa_requirements {\n    mfa_method_names = [\"sr-totp\"]\n    any_name_to_proceed = true\n  }\n}"}
+    expect:
+      status: [204]
+  - id: create-user
+    request:
+      method: POST
+      path: /v1/auth/userpass/users/sr-user
+      body: {password: p, token_policies: sr-mfa-all}
+    expect:
+      status: [204]
+  - id: login
+    request:
+      method: POST
+      path: /v1/auth/userpass/login/sr-user
+      body: {password: p}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [auth]
+        properties:
+          auth:
+            type: object
+            required: [client_token, entity_id]
+            properties:
+              client_token: {type: string}
+              entity_id: {type: string}
+    capture:
+      token: auth.client_token
+  - id: read-no-passcode-denied
+    use_captured_token: true
+    request:
+      method: GET
+      path: /v1/kv/data/sr-foo
+    expect:
+      status: [403]
+      errors_contain:
+        - "step-up MFA requirement"
+        - "missing passcode"
+        - "permission denied"
+  - id: read-unenrolled-denied
+    use_captured_token: true
+    request:
+      method: GET
+      path: /v1/kv/data/sr-foo
+      headers: {X-Vault-MFA: "sr-totp:123456"}
+    expect:
+      status: [403]
+      errors_contain: ["entity is not enrolled"]
+  - id: read-unmatched-header-method-denied
+    # The credential slot in the X-Vault-MFA header must match the method
+    # named by the policy; an unknown name provides nothing to the policy's
+    # requirement and the passcode requirement error surfaces.
+    use_captured_token: true
+    request:
+      method: GET
+      path: /v1/kv/data/sr-foo
+      headers: {X-Vault-MFA: "nope:123456"}
+    expect:
+      status: [403]
+      errors_contain: ["missing passcode"]
+  - id: switch-user-policy-to-any
+    request:
+      method: POST
+      path: /v1/auth/userpass/users/sr-user
+      body: {password: p, token_policies: sr-mfa-any}
+    expect:
+      status: [204]
+  - id: login-any
+    request:
+      method: POST
+      path: /v1/auth/userpass/login/sr-user
+      body: {password: p}
+    expect:
+      status: [200]
+    capture:
+      token: auth.client_token
+  - id: read-any-no-passcode-denied
+    use_captured_token: true
+    request:
+      method: GET
+      path: /v1/kv/data/sr-foo
+    expect:
+      status: [403]
+      errors_contain:
+        - "step-up MFA requirement"
+        - "missing passcode"
+  - id: read-any-unenrolled-denied
+    use_captured_token: true
+    request:
+      method: GET
+      path: /v1/kv/data/sr-foo
+      headers: {X-Vault-MFA: "sr-totp:123456"}
+    expect:
+      status: [403]
+      errors_contain: ["entity is not enrolled"]
+  - id: cleanup-user
+    request:
+      method: DELETE
+      path: /v1/auth/userpass/users/sr-user
+    expect:
+      status: [204]
+  - id: cleanup-policy-any
+    request:
+      method: DELETE
+      path: /v1/sys/policies/acl/sr-mfa-any
+    expect:
+      status: [204]
+  - id: cleanup-policy-all
+    request:
+      method: DELETE
+      path: /v1/sys/policies/acl/sr-mfa-all
+    expect:
+      status: [204]
+  - id: cleanup-method
+    request:
+      method: DELETE
+      path: /v1/sys/mfa/method/totp/sr-totp
+    expect:
+      status: [204]
+  - id: cleanup-mount
+    request:
+      method: DELETE
+      path: /v1/sys/mounts/sr-kv
+    expect:
+      status: [204]

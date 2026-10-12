@@ -569,3 +569,103 @@ path "secret/data/foo" {
 `))
 	require.ErrorContains(t, err, "missing required approvals")
 }
+
+func TestPolicy_Parse_MFARequirements(t *testing.T) {
+	t.Run("any-name-to-proceed", func(t *testing.T) {
+		p, err := ParseACLPolicy(namespace.RootNamespace, `path "secret/test" {
+	capabilities = ["read"]
+	mfa_requirements {
+		mfa_method_names = ["totp_a", "duo_b"]
+		any_name_to_proceed = true
+	}
+}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Paths) != 1 || p.Paths[0].Permissions == nil {
+			t.Fatal("expected one path with permissions")
+		}
+		reqs := p.Paths[0].Permissions.MFARequirements
+		if len(reqs) != 1 {
+			t.Fatalf("expected one requirement, got %d", len(reqs))
+		}
+		if !reqs[0].AnyNameToProceed {
+			t.Fatal("expected AnyNameToProceed")
+		}
+		if len(reqs[0].MFAAnyNames) != 2 || reqs[0].MFAAnyNames[0] != "totp_a" || reqs[0].MFAAnyNames[1] != "duo_b" {
+			t.Fatalf("unexpected any-names: %#v", reqs[0].MFAAnyNames)
+		}
+		if reqs[0].MFAAllNames != nil {
+			t.Fatalf("expected nil all-names, got %#v", reqs[0].MFAAllNames)
+		}
+	})
+
+	t.Run("all-names-default", func(t *testing.T) {
+		p, err := ParseACLPolicy(namespace.RootNamespace, `path "secret/test" {
+	capabilities = ["read"]
+	mfa_requirements {
+		mfa_method_names = ["totp_a", "duo_b"]
+	}
+}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reqs := p.Paths[0].Permissions.MFARequirements
+		if len(reqs) != 1 {
+			t.Fatalf("expected one requirement, got %d", len(reqs))
+		}
+		if reqs[0].AnyNameToProceed {
+			t.Fatal("expected AnyNameToProceed false by default")
+		}
+		if len(reqs[0].MFAAllNames) != 2 {
+			t.Fatalf("unexpected all-names: %#v", reqs[0].MFAAllNames)
+		}
+		if reqs[0].MFAAnyNames != nil {
+			t.Fatalf("expected nil any-names, got %#v", reqs[0].MFAAnyNames)
+		}
+	})
+
+	t.Run("empty-method-names-rejected", func(t *testing.T) {
+		_, err := ParseACLPolicy(namespace.RootNamespace, `path "secret/test" {
+	capabilities = ["read"]
+	mfa_requirements {
+		any_name_to_proceed = true
+	}
+}`)
+		if err == nil || !strings.Contains(err.Error(), "at least one mfa_method_names entry is required") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("unknown-key-rejected", func(t *testing.T) {
+		_, err := ParseACLPolicy(namespace.RootNamespace, `path "secret/test" {
+	capabilities = ["read"]
+	mfa_requirements {
+		mfa_method_names = ["totp_a"]
+		bogus = true
+	}
+}`)
+		if err == nil || !strings.Contains(err.Error(), "invalid key") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("clone-copies-requirements", func(t *testing.T) {
+		p, err := ParseACLPolicy(namespace.RootNamespace, `path "secret/test" {
+	capabilities = ["read"]
+	mfa_requirements {
+		mfa_method_names = ["totp_a"]
+	}
+}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		perms, err := p.Paths[0].Permissions.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(perms.MFARequirements) != 1 || perms.MFARequirements[0] != p.Paths[0].Permissions.MFARequirements[0] {
+			t.Fatalf("clone did not carry requirements: %#v", perms.MFARequirements)
+		}
+	})
+}

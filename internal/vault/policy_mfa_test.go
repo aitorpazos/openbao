@@ -126,3 +126,50 @@ func TestNamedMFAPolicyPropagation(t *testing.T) {
 		}
 	}
 }
+
+func TestNamedMFAPolicyRequirementsPropagation(t *testing.T) {
+	ctx := namespace.RootContext(t.Context())
+	t.Run("all-names", func(t *testing.T) {
+		p, err := policy.ParseACLPolicy(namespace.RootNamespace, `path "secret/test" {
+	capabilities = ["read"]
+	mfa_requirements {
+		mfa_method_names = ["first", "second"]
+	}
+}`)
+		require.NoError(t, err)
+		acl, err := policy.NewACL(ctx, []*policy.Policy{p})
+		require.NoError(t, err)
+		result := acl.AllowOperation(ctx, &logical.Request{Path: "secret/test", Operation: logical.ReadOperation}, false)
+		require.True(t, result.Allowed)
+		require.Len(t, result.MFARequirements, 1)
+		require.False(t, result.MFARequirements[0].AnyNameToProceed)
+		require.Equal(t, []string{"first", "second"}, result.MFARequirements[0].MFAAllNames)
+		require.Nil(t, result.MFARequirements[0].MFAAnyNames)
+	})
+	t.Run("any-names", func(t *testing.T) {
+		p, err := policy.ParseACLPolicy(namespace.RootNamespace, `path "secret/test" {
+	capabilities = ["read"]
+	mfa_requirements {
+		mfa_method_names = ["first", "second"]
+		any_name_to_proceed = true
+	}
+}`)
+		require.NoError(t, err)
+		acl, err := policy.NewACL(ctx, []*policy.Policy{p})
+		require.NoError(t, err)
+		result := acl.AllowOperation(ctx, &logical.Request{Path: "secret/test", Operation: logical.ReadOperation}, false)
+		require.True(t, result.Allowed)
+		require.Len(t, result.MFARequirements, 1)
+		require.True(t, result.MFARequirements[0].AnyNameToProceed)
+		require.Equal(t, []string{"first", "second"}, result.MFARequirements[0].MFAAnyNames)
+	})
+	t.Run("absent", func(t *testing.T) {
+		p, err := policy.ParseACLPolicy(namespace.RootNamespace, `path "secret/test" { capabilities = ["read"] }`)
+		require.NoError(t, err)
+		acl, err := policy.NewACL(ctx, []*policy.Policy{p})
+		require.NoError(t, err)
+		result := acl.AllowOperation(ctx, &logical.Request{Path: "secret/test", Operation: logical.ReadOperation}, false)
+		require.True(t, result.Allowed)
+		require.Empty(t, result.MFARequirements)
+	})
+}

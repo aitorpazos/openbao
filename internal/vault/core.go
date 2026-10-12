@@ -4094,6 +4094,39 @@ func (c *Core) performPolicyChecks(ctx context.Context, acl *policy.ACL, te *log
 				return ret
 			}
 		}
+		// Step-up MFA: policy mfa_requirements blocks. any_name_to_proceed
+		// makes one validated method from the list sufficient; otherwise every
+		// listed method must validate. Errors surface like the mfa_methods
+		// form (403), which is also the compatibility choice made above.
+		if len(ret.ACLResults.MFARequirements) != 0 {
+			var mfaErr *multierror.Error
+			for _, mfaReq := range ret.ACLResults.MFARequirements {
+				if mfaReq == nil {
+					continue
+				}
+				if mfaReq.AnyNameToProceed && len(mfaReq.MFAAnyNames) > 0 {
+					var anyErr *multierror.Error
+					for _, m := range mfaReq.MFAAnyNames {
+						anyErr = c.validateNamedMFA(ctx, req, te, []string{m})
+						if anyErr == nil {
+							break
+						}
+					}
+					if anyErr != nil {
+						mfaErr = multierror.Append(mfaErr, fmt.Errorf("step-up MFA requirement: %s", anyErr.Error()))
+					}
+				} else {
+					if err := c.validateNamedMFA(ctx, req, te, mfaReq.MFAAllNames); err != nil {
+						mfaErr = multierror.Append(mfaErr, fmt.Errorf("step-up MFA requirement: %s", err.Error()))
+					}
+				}
+			}
+			if mfaErr.ErrorOrNil() != nil {
+				ret.Error = mfaErr
+				ret.DeniedError = true
+				return ret
+			}
+		}
 	}
 
 	// Sentinel-shaped gate: EGPs on the requested path (exact match plus

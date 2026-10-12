@@ -167,14 +167,27 @@ type PathRules struct {
 
 	// These keys are used at the top level to make the HCL nicer; we store in
 	// the ACLPermissions object though
-	MinWrappingTTLHCL         any              `hcl:"min_wrapping_ttl"`
-	MaxWrappingTTLHCL         any              `hcl:"max_wrapping_ttl"`
-	AllowedParametersHCL      map[string][]any `hcl:"allowed_parameters"`
-	DeniedParametersHCL       map[string][]any `hcl:"denied_parameters"`
-	RequiredParametersHCL     []string         `hcl:"required_parameters"`
-	MFAMethodsHCL             []string         `hcl:"mfa_methods"`
-	PaginationLimitHCL        int              `hcl:"pagination_limit"`
-	ResponseKeysFilterPathHCL string           `hcl:"list_scan_response_keys_filter_path"`
+	MinWrappingTTLHCL         any               `hcl:"min_wrapping_ttl"`
+	MaxWrappingTTLHCL         any               `hcl:"max_wrapping_ttl"`
+	AllowedParametersHCL      map[string][]any  `hcl:"allowed_parameters"`
+	DeniedParametersHCL       map[string][]any  `hcl:"denied_parameters"`
+	RequiredParametersHCL     []string          `hcl:"required_parameters"`
+	MFAMethodsHCL             []string          `hcl:"mfa_methods"`
+	MFARequirementsHCL        []*MFARequirement `hcl:"-"`
+	PaginationLimitHCL        int               `hcl:"pagination_limit"`
+	ResponseKeysFilterPathHCL string            `hcl:"list_scan_response_keys_filter_path"`
+}
+
+// MFARequirement is one `mfa_requirements` block inside a path stanza. With
+// any_name_to_proceed set, validating any single method from the list is
+// sufficient; otherwise every listed method must validate. The split into
+// any/all name lists happens at parse time so the ACL layer never has to
+// re-branch on the flag.
+type MFARequirement struct {
+	MFAAnyNames      []string `hcl:"-"`
+	MFAAllNames      []string `hcl:"-"`
+	AnyNameToProceed bool     `hcl:"any_name_to_proceed"`
+	MFAMethodNames   []string `hcl:"mfa_method_names"`
 }
 
 type IdentityFactor struct {
@@ -191,6 +204,7 @@ type ACLPermissions struct {
 	DeniedParameters       map[string][]any
 	RequiredParameters     []string
 	MFAMethods             []string
+	MFARequirements        []*MFARequirement
 	PaginationLimit        int
 	GrantingPoliciesMap    map[uint32][]logical.PolicyInfo
 	ResponseKeysFilterPath string
@@ -261,6 +275,11 @@ func (p *ACLPermissions) Clone() (*ACLPermissions, error) {
 			return nil, err
 		}
 		ret.MFAMethods = clonedMFAMethods.([]string)
+	}
+
+	if len(p.MFARequirements) > 0 {
+		ret.MFARequirements = make([]*MFARequirement, len(p.MFARequirements))
+		copy(ret.MFARequirements, p.MFARequirements)
 	}
 
 	switch {
@@ -456,6 +475,7 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 		"min_wrapping_ttl",
 		"max_wrapping_ttl",
 		"mfa_methods",
+		"mfa_requirements",
 		"pagination_limit",
 		"expiration",
 		"list_scan_response_keys_filter_path",
@@ -554,6 +574,31 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("error handling control_group: %w", err)
+	}
+
+	// decode mfa_requirements if needed
+	if err := hclutil.WhenHCLKeyPresent(item.Val, "mfa_requirements", func(item *ast.ObjectItem) error {
+		if err := hclutil.CheckHCLKeys(item.Val, []string{"mfa_method_names", "any_name_to_proceed"}); err != nil {
+			return multierror.Prefix(err, "path mfa_requirements:")
+		}
+		req := new(MFARequirement)
+		if err := hcl.DecodeObject(req, item.Val); err != nil {
+			return multierror.Prefix(err, "path mfa_requirements:")
+		}
+		if req.AnyNameToProceed {
+			req.MFAAnyNames = req.MFAMethodNames
+			req.MFAAllNames = nil
+		} else {
+			req.MFAAllNames = req.MFAMethodNames
+			req.MFAAnyNames = nil
+		}
+		if len(req.MFAAnyNames) == 0 && len(req.MFAAllNames) == 0 {
+			return errors.New("at least one mfa_method_names entry is required")
+		}
+		pc.MFARequirementsHCL = append(pc.MFARequirementsHCL, req)
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("error handling mfa_requirements: %w", err)
 	}
 
 	pc.Path = key
@@ -667,6 +712,10 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 	if pc.MFAMethodsHCL != nil {
 		pc.Permissions.MFAMethods = make([]string, len(pc.MFAMethodsHCL))
 		copy(pc.Permissions.MFAMethods, pc.MFAMethodsHCL)
+	}
+	if len(pc.MFARequirementsHCL) > 0 {
+		pc.Permissions.MFARequirements = make([]*MFARequirement, len(pc.MFARequirementsHCL))
+		copy(pc.Permissions.MFARequirements, pc.MFARequirementsHCL)
 	}
 	if pc.Permissions.MinWrappingTTL != 0 &&
 		pc.Permissions.MaxWrappingTTL != 0 &&
