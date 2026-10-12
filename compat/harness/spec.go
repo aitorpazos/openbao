@@ -27,6 +27,7 @@ type Spec struct {
 type Case struct {
 	ID      string   `yaml:"id"`
 	Depends []string `yaml:"depends"`
+	Note    string   `yaml:"note"`
 	// CaptureToken stores auth.client_token from a successful response so
 	// later cases can act as the created identity (e.g. token-based
 	// enforcement checks). Shorthand for capture: {token: auth.client_token}.
@@ -45,6 +46,43 @@ type Case struct {
 	NoAuth  bool    `yaml:"no_auth"`
 	Request Request `yaml:"request"`
 	Expect  Expect  `yaml:"expect"`
+	// Subscribe turns the case into a WebSocket subscription against
+	// /v1/sys/events/subscribe/{type}. While the stream is open the
+	// Actions run (with the run token), and ExpectEvent/ExpectNoEvent
+	// are evaluated over the delivered events.
+	Subscribe     *SubscribeSpec `yaml:"subscribe"`
+	Actions       []ActionCase   `yaml:"actions"`
+	ExpectEvent   *ExpectEvent   `yaml:"expect_event"`
+	ExpectNoEvent []ExpectEvent  `yaml:"expect_no_event"`
+}
+type SubscribeSpec struct {
+	// Type is the event type to subscribe to; may contain `*` wildcards.
+	Type string `yaml:"type"`
+	// JSON requests the JSON delivery format (json=true). When false the
+	// documented default (protobuf binary) is requested.
+	JSON bool `yaml:"json"`
+	// Filter is the documented filter expression (applied server-side).
+	Filter string `yaml:"filter"`
+	// Namespaces adds documented child-namespace patterns (repeated param).
+	Namespaces []string `yaml:"namespaces"`
+	// TimeoutSeconds bounds the event-delivery window (default 15).
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+}
+type ActionCase struct {
+	Request Request `yaml:"request"`
+	Expect  Expect  `yaml:"expect"`
+}
+type ExpectEvent struct {
+	// Type must equal data.event_type for JSON events; when Binary is set
+	// the event is only checked for non-empty non-JSON binary framing.
+	Type string `yaml:"type"`
+	// Metadata asserts the listed data.event.metadata entries (subset).
+	Metadata map[string]string `yaml:"metadata"`
+	// Envelope asserts top-level fields: specversion, datacontentype, and
+	// source_prefix (checked as prefix of source).
+	Envelope map[string]string `yaml:"envelope"`
+	// Binary marks the event as expected in the protobuf binary format.
+	Binary bool `yaml:"binary"`
 }
 type Request struct {
 	Method  string            `yaml:"method"`
@@ -155,10 +193,24 @@ func checkSpec(s *Spec) error {
 				return fmt.Errorf("case %s: dependency %q must name a case in this file", c.ID, dep)
 			}
 		}
-		if c.Request.Method == "" || !strings.HasPrefix(c.Request.Path, "/v1/") {
-			return fmt.Errorf("case %s: method and /v1/ path required", c.ID)
+		if c.Subscribe == nil && len(c.Actions) == 0 {
+			if c.Request.Method == "" || !strings.HasPrefix(c.Request.Path, "/v1/") {
+				return fmt.Errorf("case %s: method and /v1/ path required", c.ID)
+			}
+		} else if c.Subscribe != nil {
+			if err := checkSubscribeCase(c); err != nil {
+				return fmt.Errorf("case %s: %w", c.ID, err)
+			}
 		}
-		if len(c.Expect.Status) == 0 {
+		for _, a := range c.Actions {
+			if a.Request.Method == "" || !strings.HasPrefix(a.Request.Path, "/v1/") {
+				return fmt.Errorf("case %s: action method and /v1/ path required", c.ID)
+			}
+			if len(a.Expect.Status) == 0 {
+				a.Expect.Status = Statuses{200, 204}
+			}
+		}
+		if len(c.Expect.Status) == 0 && len(c.Actions) == 0 {
 			return fmt.Errorf("case %s: status required", c.ID)
 		}
 		for _, status := range c.Expect.Status {
@@ -190,6 +242,51 @@ func checkSpec(s *Spec) error {
 				return err
 			}
 			c.Expect.Exact = v.(map[string]any)
+		}
+	}
+	return nil
+}
+
+// checkSubscribeCase validates a WebSocket subscription case.
+func checkSubscribeCase(c *Case) error {
+	s := c.Subscribe
+	if s.Type == "" {
+		return fmt.Errorf("subscribe type required")
+	}
+	if s.TimeoutSeconds == 0 {
+		s.TimeoutSeconds = 15
+	}
+	if s.TimeoutSeconds <= 0 || s.TimeoutSeconds > 120 {
+		return fmt.Errorf("subscribe timeout_seconds must be between 1 and 120")
+	}
+	for _, a := range c.Actions {
+		if a.Request.Method == "" || !strings.HasPrefix(a.Request.Path, "/v1/") {
+			return fmt.Errorf("subscribe action requires method and /v1/ path")
+		}
+		if len(a.Expect.Status) == 0 {
+			a.Expect.Status = Statuses{200, 204}
+		}
+	}
+	if c.ExpectEvent == nil && len(c.ExpectNoEvent) == 0 {
+		// A subscribe case without event assertions only checks the
+		// handshake status (e.g. 401/403 rejection cases).
+		return nil
+	}
+	if c.ExpectEvent != nil {
+		if !c.ExpectEvent.Binary && c.ExpectEvent.Type == "" {
+			return fmt.Errorf("expect_event.type required (unless binary)")
+		}
+		for k := range c.ExpectEvent.Envelope {
+			switch k {
+			case "specversion", "datacontentype", "source_prefix":
+			default:
+				return fmt.Errorf("expect_event.envelope supports specversion, datacontentype, source_prefix (got %q)", k)
+			}
+		}
+	}
+	for _, ne := range c.ExpectNoEvent {
+		if !ne.Binary && ne.Type == "" {
+			return fmt.Errorf("expect_no_event.type required (unless binary)")
 		}
 	}
 	return nil

@@ -392,6 +392,7 @@ func (b *versionedKVBackend) pathDataWrite() framework.OperationFunc {
 			req.Storage = originalStorage
 		}
 
+		b.emitMutation(ctx, req)
 		return resp, nil
 	}
 }
@@ -604,6 +605,7 @@ func (b *versionedKVBackend) pathDataPatch() framework.OperationFunc {
 			req.Storage = originalStorage
 		}
 
+		b.emitMutation(ctx, req)
 		return resp, nil
 	}
 }
@@ -670,6 +672,7 @@ func (b *versionedKVBackend) pathDataDelete() framework.OperationFunc {
 			req.Storage = originalStorage
 		}
 
+		b.emitMutation(ctx, req)
 		return nil, nil
 	}
 }

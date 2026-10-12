@@ -53,6 +53,7 @@ type AuthResults struct {
 }
 
 type ACLResults struct {
+	SubscribeEventTypes    []string
 	Allowed                bool
 	RootPrivs              bool
 	IsRoot                 bool
@@ -168,6 +169,7 @@ func NewACL(ctx context.Context, policies []*Policy) (*ACL, error) {
 			case pc.Permissions.CapabilitiesBitmap&DenyCapabilityInt > 0:
 				// If this new policy explicitly denies, only save the deny value
 				existingPerms.CapabilitiesBitmap = DenyCapabilityInt
+				existingPerms.SubscribeEventTypes = nil
 				existingPerms.AllowedParameters = nil
 				existingPerms.DeniedParameters = nil
 				goto INSERT
@@ -176,6 +178,7 @@ func NewACL(ctx context.Context, policies []*Policy) (*ACL, error) {
 				// Insert the capabilities in this new policy into the existing
 				// value
 				existingPerms.CapabilitiesBitmap = existingPerms.CapabilitiesBitmap | pc.Permissions.CapabilitiesBitmap
+				existingPerms.SubscribeEventTypes = append(existingPerms.SubscribeEventTypes, pc.Permissions.SubscribeEventTypes...)
 				existingPerms.GrantingPoliciesMap = addGrantingPoliciesToMap(existingPerms.GrantingPoliciesMap, policy, pc.Permissions.CapabilitiesBitmap)
 			}
 
@@ -311,6 +314,9 @@ func (a *ACL) Capabilities(ctx context.Context, path string) (pathCapabilities [
 	}
 
 	capabilities := res.CapabilitiesBitmap
+	if capabilities&SubscribeCapabilityInt > 0 {
+		pathCapabilities = append(pathCapabilities, SubscribeCapability)
+	}
 
 	if capabilities&SudoCapabilityInt > 0 {
 		pathCapabilities = append(pathCapabilities, SudoCapability)
@@ -437,6 +443,7 @@ func (a *ACL) AllowOperation(ctx context.Context, req *logical.Request, capCheck
 	return ret
 
 CHECK:
+	ret.SubscribeEventTypes = permissions.SubscribeEventTypes
 	// Copy ControlGroup from ACL to ACLResults
 	ret.ControlGroup = permissions.ControlGroup
 

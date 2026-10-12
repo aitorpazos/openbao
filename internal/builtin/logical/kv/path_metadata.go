@@ -595,6 +595,9 @@ func (b *versionedKVBackend) pathMetadataWrite() framework.OperationFunc {
 			}
 		}
 
+		if err == nil {
+			b.emitMutation(ctx, req)
+		}
 		return resp, err
 	}
 }
@@ -758,6 +761,7 @@ func (b *versionedKVBackend) pathMetadataPatch() framework.OperationFunc {
 			req.Storage = originalStorage
 		}
 
+		b.emitMutation(ctx, req)
 		return resp, nil
 	}
 }
@@ -822,6 +826,9 @@ func (b *versionedKVBackend) pathMetadataDelete() framework.OperationFunc {
 				}
 				req.Storage = originalStorage
 			}
+		}
+		if err == nil {
+			b.emitMutation(ctx, req)
 		}
 		return nil, err
 	}

@@ -25,16 +25,17 @@ import (
 )
 
 const (
-	DenyCapability   = "deny"
-	CreateCapability = "create"
-	ReadCapability   = "read"
-	UpdateCapability = "update"
-	DeleteCapability = "delete"
-	ListCapability   = "list"
-	SudoCapability   = "sudo"
-	RootCapability   = "root"
-	PatchCapability  = "patch"
-	ScanCapability   = "scan"
+	DenyCapability      = "deny"
+	CreateCapability    = "create"
+	ReadCapability      = "read"
+	UpdateCapability    = "update"
+	DeleteCapability    = "delete"
+	ListCapability      = "list"
+	SudoCapability      = "sudo"
+	RootCapability      = "root"
+	PatchCapability     = "patch"
+	ScanCapability      = "scan"
+	SubscribeCapability = "subscribe"
 
 	// Backwards compatibility
 	OldDenyPathPolicy  = "deny"
@@ -53,6 +54,7 @@ const (
 	SudoCapabilityInt
 	PatchCapabilityInt
 	ScanCapabilityInt
+	SubscribeCapabilityInt
 )
 
 // Currently only ACL policies are supported, with PolicyTypeToken being an
@@ -82,15 +84,16 @@ func (p Type) String() string {
 }
 
 var cap2Int = map[string]uint32{
-	DenyCapability:   DenyCapabilityInt,
-	CreateCapability: CreateCapabilityInt,
-	ReadCapability:   ReadCapabilityInt,
-	UpdateCapability: UpdateCapabilityInt,
-	DeleteCapability: DeleteCapabilityInt,
-	ListCapability:   ListCapabilityInt,
-	SudoCapability:   SudoCapabilityInt,
-	PatchCapability:  PatchCapabilityInt,
-	ScanCapability:   ScanCapabilityInt,
+	DenyCapability:      DenyCapabilityInt,
+	CreateCapability:    CreateCapabilityInt,
+	ReadCapability:      ReadCapabilityInt,
+	UpdateCapability:    UpdateCapabilityInt,
+	DeleteCapability:    DeleteCapabilityInt,
+	ListCapability:      ListCapabilityInt,
+	SudoCapability:      SudoCapabilityInt,
+	PatchCapability:     PatchCapabilityInt,
+	ScanCapability:      ScanCapabilityInt,
+	SubscribeCapability: SubscribeCapabilityInt,
 }
 
 // Policy is used to represent the policy specified by an ACL configuration.
@@ -154,6 +157,7 @@ func (p *Policy) Decode(name string, ns *namespace.Namespace) error {
 
 // PathRules represents a policy for a path in the namespace.
 type PathRules struct {
+	SubscribeEventTypes []string `hcl:"subscribe_event_types"`
 	Path                string
 	Policy              string
 	Permissions         *ACLPermissions
@@ -197,6 +201,7 @@ type IdentityFactor struct {
 }
 
 type ACLPermissions struct {
+	SubscribeEventTypes    []string
 	CapabilitiesBitmap     uint32
 	MinWrappingTTL         time.Duration
 	MaxWrappingTTL         time.Duration
@@ -233,6 +238,7 @@ type ControlGroupIdentity struct {
 
 func (p *ACLPermissions) Clone() (*ACLPermissions, error) {
 	ret := &ACLPermissions{
+		SubscribeEventTypes:    append([]string(nil), p.SubscribeEventTypes...),
 		CapabilitiesBitmap:     p.CapabilitiesBitmap,
 		MinWrappingTTL:         p.MinWrappingTTL,
 		MaxWrappingTTL:         p.MaxWrappingTTL,
@@ -469,6 +475,7 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 		"comment",
 		"policy",
 		"capabilities",
+		"subscribe_event_types",
 		"allowed_parameters",
 		"denied_parameters",
 		"required_parameters",
@@ -675,7 +682,7 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 			pc.Capabilities = []string{DenyCapability}
 			pc.Permissions.CapabilitiesBitmap = DenyCapabilityInt
 			goto PathFinished
-		case CreateCapability, ReadCapability, UpdateCapability, DeleteCapability, ListCapability, SudoCapability, PatchCapability, ScanCapability:
+		case CreateCapability, ReadCapability, UpdateCapability, DeleteCapability, ListCapability, SudoCapability, PatchCapability, ScanCapability, SubscribeCapability:
 			pc.Permissions.CapabilitiesBitmap |= cap2Int[cap]
 		default:
 			return nil, fmt.Errorf("path %q: invalid capability %q", key, cap)
@@ -683,10 +690,14 @@ func parsePath(result *Policy, key string, item *ast.ObjectItem, performTemplati
 	}
 
 	if pc.AllowedParametersHCL != nil {
+		// Parameter constraints are independent of subscription grants.
 		pc.Permissions.AllowedParameters = make(map[string][]any, len(pc.AllowedParametersHCL))
 		for k, v := range pc.AllowedParametersHCL {
 			pc.Permissions.AllowedParameters[strings.ToLower(k)] = v
 		}
+	}
+	if pc.Permissions.CapabilitiesBitmap&(ListCapabilityInt|SubscribeCapabilityInt) == ListCapabilityInt|SubscribeCapabilityInt {
+		pc.Permissions.SubscribeEventTypes = append([]string(nil), pc.SubscribeEventTypes...)
 	}
 	if pc.DeniedParametersHCL != nil {
 		pc.Permissions.DeniedParameters = make(map[string][]any, len(pc.DeniedParametersHCL))

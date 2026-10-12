@@ -238,7 +238,7 @@ func (r *revocationJob) Execute() error {
 	// inherently already hold the lock here. Assuming seal/unseal transitions are the only
 	// conditions where not holding a read lock on core is racy, we are safe to never
 	// lock here at all.
-	return r.m.Revoke(revokeCtx, r.leaseID)
+	return r.m.Revoke(context.WithValue(revokeCtx, leaseExpiryEventKey{}, true), r.leaseID)
 }
 
 func (r *revocationJob) OnFailure(err error) {
@@ -1127,6 +1127,10 @@ func (m *ExpirationManager) revokeCommon(ctx context.Context, leaseID string, fo
 		}
 		m.logger.Warn("finished revoking incorrectly non-expiring lease", "leaseID", le.LeaseID, "accessor", accessor)
 	}
+	m.emitLeaseEvent(ctx, le, "revoked")
+	if expired, _ := ctx.Value(leaseExpiryEventKey{}).(bool); expired {
+		m.emitLeaseEvent(ctx, le, "expired")
+	}
 	return nil
 }
 
@@ -1361,6 +1365,7 @@ func (m *ExpirationManager) Renew(ctx context.Context, leaseID string, increment
 	m.updatePending(le)
 
 	// Return the response
+	m.emitLeaseEvent(ctx, le, "renewed")
 	return resp, nil
 }
 
@@ -1479,6 +1484,7 @@ func (m *ExpirationManager) RenewToken(ctx context.Context, req *logical.Request
 	m.updatePending(le)
 
 	retResp.Auth = resp.Auth
+	m.emitLeaseEvent(ctx, le, "renewed")
 	return retResp, nil
 }
 
@@ -1615,6 +1621,7 @@ func (m *ExpirationManager) Register(ctx context.Context, req *logical.Request, 
 	resp.Secret.TTL = time.Until(le.ExpireTime).Round(time.Second)
 
 	// Done
+	m.emitLeaseEvent(ctx, le, "issued")
 	return le.LeaseID, nil
 }
 
@@ -1702,6 +1709,7 @@ func (m *ExpirationManager) RegisterAuth(ctx context.Context, te *logical.TokenE
 		te.ExternalID = tok
 	}
 
+	m.emitLeaseEvent(ctx, &le, "issued")
 	return nil
 }
 

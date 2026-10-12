@@ -163,6 +163,7 @@ func (b *versionedKVBackend) pathConfigWrite() framework.OperationFunc {
 		defer b.globalConfigLock.Unlock()
 
 		b.globalConfig = config
+		b.emitMutation(ctx, req)
 
 		return nil, nil
 	}

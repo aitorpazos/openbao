@@ -108,6 +108,7 @@ func (b *versionedKVBackend) pathDestroyWrite() framework.OperationFunc {
 			req.Storage = originalStorage
 		}
 
+		b.emitMutation(ctx, req)
 		return nil, nil
 	}
 }

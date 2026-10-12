@@ -41,6 +41,8 @@ var regexSingletonCache sync.Map
 //
 // This is recommended over implementing logical.Backend directly.
 type Backend struct {
+	eventSink   logical.EventSender
+	eventSinkMu sync.RWMutex
 	// Help is the help text that is shown when a help request is made
 	// on the root of this resource. The root help is special since we
 	// show all the paths that can be requested.

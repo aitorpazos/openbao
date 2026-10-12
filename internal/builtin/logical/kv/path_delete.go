@@ -134,6 +134,7 @@ func (b *versionedKVBackend) pathUndeleteWrite() framework.OperationFunc {
 			req.Storage = originalStorage
 		}
 
+		b.emitMutation(ctx, req)
 		return nil, nil
 	}
 }
@@ -208,6 +209,7 @@ func (b *versionedKVBackend) pathDeleteWrite() framework.OperationFunc {
 			req.Storage = originalStorage
 		}
 
+		b.emitMutation(ctx, req)
 		return nil, nil
 	}
 }

@@ -15,23 +15,29 @@ deferred — no in-tree FIPS 205 implementation), plugin workload identity
 (LDAP auth + secrets, database rootless/static-role fields, AWS/Azure/GCP
 auth + secrets config engines — config-only with explicit remote-operation
 rejection), sealwrap/rewrap + seal-backend-status, autopilot
-disable_upgrade_migration, and internal-UI namespace listing.
+disable_upgrade_migration, internal-UI namespace listing, and event
+notifications (the `/sys/events/subscribe/{eventType}` WebSocket with the
+documented CloudEvents envelope, `json`/`filter`/`namespaces` parameters,
+the `subscribe` policy capability + `subscribe_event_types` rules, the
+documented filter grammar, and lease + kv event emission).
 
 Also added: specs for the DR operation-token ceremony route/schema surface
 (implementation belongs to the replication agent's lane; 9 cases remain
 FEATURE_ABSENT pending those routes).
 
-Live full-suite state on an in-memory dev server (compat-harness,
-commit 77df0bf + this addendum's branches): **889 PASS / 37 FEATURE_ABSENT /
-17 FAIL / 3 SKIP**. The 17 FAILs decompose as: 13 SCIM fixture-contract cases
-(clear when run with the documented SCIM-actor token — verified 20/20; the
-suite's shared token cannot be the registered actor), 3 audit cases requiring
-the `unsafe-allow-api-audit-creation` dev flag, and 1 documented
-asynchronous namespace-deletion fixture race (direct retry succeeds).
-FEATURE_ABSENT decomposes as: raft-integrated-storage prerequisites
-(autosnapshot 16, snapshot-load 5, autopilot config 6, redundancy state 1)
-and the 9 DR operation-token routes. SLH-DSA create (1 FAIL) is a documented
-clean-room deferral, not a spec error.
+Live full-suite state on an in-memory dev server (compat-harness, latest
+branch tip): **966 PASS / 39 FEATURE_ABSENT / 25 FAIL / 27 SKIP**. The FAILs
+decompose as: 16 SCIM fixture-contract cases (clear when run with the
+documented SCIM-actor token — verified 20/20; the suite's shared token cannot
+be the registered actor), 3 audit cases requiring the
+`unsafe-allow-api-audit-creation` dev flag, 3 recovery-key-rekey fixture
+gates (deliberate: the fixture-only suites FAIL their gate on non-fixture
+targets so the rest SKIP), 1 documented asynchronous namespace-deletion
+fixture race (direct retry succeeds), and SLH-DSA create — a documented
+clean-room deferral, not a spec error. FEATURE_ABSENT decomposes as:
+raft-integrated-storage prerequisites (autosnapshot 16, snapshot-load 5,
+autopilot config 6, redundancy state 1), the 9 DR operation-token routes,
+and 2 rekey-recovery-key probes on the non-recovery-sealed dev target.
 
 Remaining documented-deferral families (Medium priority per the census):
 KMIP listener/CA/client fixtures, performance-standby/consistency

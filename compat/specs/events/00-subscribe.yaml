@@ -1,0 +1,421 @@
+# Events: subscription endpoint contract.
+# Source: https://developer.hashicorp.com/vault/docs/concepts/events (v2.x latest, Enterprise-gated);
+#         https://developer.hashicorp.com/vault/docs/commands/events (v2.x latest) for parameters.
+api: sys-events-subscribe
+feature: events
+source: https://developer.hashicorp.com/vault/docs/concepts/events
+source_version: v2.x (latest)
+notes: notes.md
+cases:
+  # ---- Authentication / authorization on the subscription endpoint ----
+  - id: subscribe-unauthenticated-rejected
+    note: The subscription endpoint supports the standard authentication workflows.
+    no_auth: true
+    subscribe:
+      type: kv-v2/data-write
+    expect:
+      status: [401]
+
+  - id: policy-grant-subscribe
+    note: Policy granting read on the subscribe path plus list+subscribe on the secret path with subscribe_event_types.
+    request:
+      method: POST
+      path: /v1/sys/policies/acl/compat-evt-policy
+      body:
+        policy: |
+          path "sys/events/subscribe/kv-v2/*" {
+            capabilities = ["read"]
+          }
+          path "secret/data/compat-evt-p*" {
+            capabilities = ["list", "subscribe"]
+            subscribe_event_types = ["kv-v2/data-write"]
+          }
+          path "secret/metadata/compat-evt-p*" {
+            capabilities = ["list", "subscribe"]
+            subscribe_event_types = ["kv-v2/data-write"]
+          }
+    expect: {status: [200, 204]}
+
+  - id: policy-denied-subscribe
+    note: A policy without any events or subscribe grants; its token must be rejected from subscribing.
+    request:
+      method: POST
+      path: /v1/sys/policies/acl/compat-evt-policy-denied
+      body:
+        policy: |
+          path "sys/*" {
+            capabilities = ["deny"]
+          }
+    expect: {status: [200, 204]}
+
+  - id: token-with-subscribe-policy
+    depends: [policy-grant-subscribe]
+    request:
+      method: POST
+      path: /v1/auth/token/create
+      body:
+        policies: [compat-evt-policy]
+        ttl: 30m
+        renewable: false
+    expect: {status: [200, 204]}
+    capture:
+      evt-token: auth.client_token
+
+  - id: token-without-subscribe-policy
+    depends: [policy-denied-subscribe]
+    request:
+      method: POST
+      path: /v1/auth/token/create
+      body:
+        policies: [compat-evt-policy-denied]
+        ttl: 30m
+        renewable: false
+    expect: {status: [200, 204]}
+    capture:
+      evt-denied-token: auth.client_token
+
+  - id: subscribe-non-root-denied
+    depends: [token-without-subscribe-policy]
+    use_captured_token: evt-denied-token
+    note: Without a read grant on sys/events/subscribe/<type>, subscription is rejected.
+    subscribe:
+      type: kv-v2/data-write
+    expect:
+      status: [403]
+
+  # ---- JSON delivery of KV events ----
+  - id: subscribe-kv-v2-data-write-json
+    subscribe:
+      type: kv-v2/data-write
+      json: true
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-w1
+          body:
+            data:
+              val: one
+        expect: {status: 200}
+      - request:
+          method: DELETE
+          path: /v1/secret/data/compat-evt-w1
+        expect: {status: [200, 204]}
+    expect_event:
+      type: kv-v2/data-write
+      envelope:
+        specversion: "1.0"
+        source_prefix: vault://
+        datacontentype: application/cloudevents
+      metadata:
+        operation: data-write
+        path: secret/data/compat-evt-w1
+        data_path: secret/data/compat-evt-w1
+        modified: "true"
+
+  - id: subscribe-wildcard-data-delete
+    subscribe:
+      type: kv-v2/data-*
+      json: true
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-w2
+          body:
+            data:
+              val: two
+        expect: {status: 200}
+      - request:
+          method: DELETE
+          path: /v1/secret/data/compat-evt-w2
+        expect: {status: [200, 204]}
+    expect_event:
+      type: kv-v2/data-delete
+      metadata:
+        path: secret/data/compat-evt-w2
+
+  - id: subscribe-protobuf-binary-default
+    subscribe:
+      type: kv-v2/data-write
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-w3
+          body:
+            data:
+              val: three
+        expect: {status: 200}
+    expect_event:
+      type: kv-v2/data-write
+      binary: true
+
+  - id: subscribe-metadata-destroy
+    subscribe:
+      type: kv-v2/destroy
+      json: true
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-w4
+          body:
+            data:
+              val: four
+        expect: {status: 200}
+      - request:
+          method: POST
+          path: /v1/secret/destroy/compat-evt-w4
+          body:
+            versions: [1]
+        expect: {status: [200, 204]}
+    expect_event:
+      type: kv-v2/destroy
+      metadata:
+        path: secret/destroy/compat-evt-w4
+        operation: destroy
+
+  # ---- Filter expressions (documented selectors; applied after policy) ----
+  - id: subscribe-filter-narrows-delivery
+    subscribe:
+      type: kv-v2/data-write
+      json: true
+      filter: 'data_path == secret/data/compat-evt-f1'
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-f1
+          body:
+            data:
+              val: keep
+        expect: {status: 200}
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-f2
+          body:
+            data:
+              val: drop
+        expect: {status: 200}
+    expect_event:
+      type: kv-v2/data-write
+      metadata:
+        data_path: secret/data/compat-evt-f1
+    expect_no_event:
+      - type: kv-v2/data-write
+        metadata:
+          data_path: secret/data/compat-evt-f2
+
+  - id: subscribe-filter-operation-inequality
+    subscribe:
+      type: kv-v2/data-*
+      json: true
+      filter: 'data_path == secret/data/compat-evt-f3 and operation != "data-write"'
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-f3
+          body:
+            data:
+              val: keep-del
+        expect: {status: 200}
+      - request:
+          method: DELETE
+          path: /v1/secret/data/compat-evt-f3
+        expect: {status: [200, 204]}
+    expect_event:
+      type: kv-v2/data-delete
+      metadata:
+        data_path: secret/data/compat-evt-f3
+    expect_no_event:
+      - type: kv-v2/data-write
+        metadata:
+          data_path: secret/data/compat-evt-f3
+
+  # ---- Namespace scoping ----
+  - id: subscribe-namespace-scoped
+    note: By default the subscription covers the requesting namespace only.
+    subscribe:
+      type: kv-v2/data-write
+      json: true
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/sys/namespaces/compat-evt-ns
+        expect: {status: [200, 204, 400, 404]}
+      # Write inside the child namespace must NOT reach a root-namespace subscriber.
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-ns-w
+          headers: {X-Vault-Namespace: compat-evt-ns}
+          body:
+            data:
+              val: ns
+        expect: {status: [200, 204, 400, 404]}
+      # Write in the requesting namespace arrives.
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-ns-root
+          body:
+            data:
+              val: root
+        expect: {status: 200}
+    expect_event:
+      type: kv-v2/data-write
+      metadata:
+        path: secret/data/compat-evt-ns-root
+    expect_no_event:
+      - type: kv-v2/data-write
+        metadata:
+          path: secret/data/compat-evt-ns-w
+
+  # ---- Lease events via PKI certificate issuance ----
+  - id: pki-setup
+    actions:
+      - request:
+          method: DELETE
+          path: /v1/sys/mounts/compat-evt-pki
+        expect: {status: [200, 204, 404]}
+      - request:
+          method: POST
+          path: /v1/sys/mounts/compat-evt-pki
+          body:
+            type: pki
+        expect: {status: [200, 204]}
+
+  - id: pki-root-and-role
+    depends: [pki-setup]
+    actions:
+      - request:
+          method: POST
+          path: /v1/compat-evt-pki/root/generate/internal
+          body:
+            common_name: compat-evt-root.example.com
+            ttl: 1h
+        expect: {status: [200, 204]}
+      - request:
+          method: POST
+          path: /v1/compat-evt-pki/roles/compat-evt-role
+          body:
+            allowed_domains: [compat-evt.example.com]
+            allow_subdomains: true
+            generate_lease: true
+        expect: {status: [200, 204]}
+    expect: {status: 200}
+
+  - id: lease-issued-on-pki-cert
+    depends: [pki-root-and-role]
+    subscribe:
+      type: lease/issued
+      json: true
+      timeout_seconds: 25
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/compat-evt-pki/issue/compat-evt-role
+          body:
+            common_name: issued.compat-evt.example.com
+            ttl: 2m
+        expect: {status: [200, 204]}
+    expect_event:
+      type: lease/issued
+      metadata:
+        operation: issued
+        path: compat-evt-pki/issue/compat-evt-role
+
+  - id: lease-revoked-on-pki-revoke
+    depends: [pki-root-and-role]
+    subscribe:
+      type: lease/revoked
+      json: true
+      timeout_seconds: 25
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/compat-evt-pki/issue/compat-evt-role
+          body:
+            common_name: revoke.compat-evt.example.com
+            ttl: 2m
+        expect: {status: [200, 204]}
+      - request:
+          method: PUT
+          path: /v1/sys/leases/revoke-prefix/compat-evt-pki
+        expect: {status: [200, 204]}
+    expect_event:
+      type: lease/revoked
+
+  # ---- Policy-gated subscription of secret events ----
+  - id: subscribe-with-granted-policy-json
+    depends: [token-with-subscribe-policy]
+    use_captured_token: evt-token
+    subscribe:
+      type: kv-v2/data-write
+      json: true
+      timeout_seconds: 20
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-p1
+          body:
+            data:
+              val: granted
+        expect: {status: 200}
+    expect_event:
+      type: kv-v2/data-write
+      metadata:
+        path: secret/data/compat-evt-p1
+
+  - id: subscribe-without-secret-path-grant-silent
+    depends: [token-with-subscribe-policy]
+    use_captured_token: evt-token
+    note: The subscriber is only allowed kv-v2/data-write on compat-evt-p*; a write outside that scope must not be delivered.
+    subscribe:
+      type: kv-v2/data-write
+      json: true
+      timeout_seconds: 15
+    expect:
+      status: [101]
+    actions:
+      - request:
+          method: POST
+          path: /v1/secret/data/compat-evt-ungrant
+          body:
+            data:
+              val: outside
+        expect: {status: 200}
+    expect_no_event:
+      - type: kv-v2/data-write
+        metadata:
+          path: secret/data/compat-evt-ungrant
+
+  # ---- Cleanup ----
+  - id: cleanup
+    depends: [subscribe-without-secret-path-grant-silent, lease-revoked-on-pki-revoke, subscribe-namespace-scoped]
+    note: Best-effort cleanup; not part of the documented contract.
+    request:
+      method: DELETE
+      path: /v1/secret/metadata/compat-evt-w1
+    expect: {status: [200, 204, 404]}

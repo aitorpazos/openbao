@@ -1,0 +1,33 @@
+// Copyright (c) 2026 OpenBao a Series of LF Projects, LLC
+// SPDX-License-Identifier: MPL-2.0
+
+syntax = "proto3";
+package logical;
+option go_package = "github.com/openbao/openbao/sdk/v2/logical";
+
+// Clean-room schema from the public event JSON documentation. Field numbers
+// are local; binary compatibility with another implementation is not claimed.
+message EventReceived {
+  string id = 1;
+  string source = 2;
+  string specversion = 3;
+  string type = 4;
+  EventData data = 5;
+  string datacontentype = 6;
+  string time = 7;
+}
+message EventData {
+  Event event = 1;
+  string event_type = 2;
+  PluginInfo plugin_info = 3;
+}
+message Event {
+  string id = 1;
+  map<string, string> metadata = 2;
+}
+message PluginInfo {
+  string mount_class = 1;
+  string mount_accessor = 2;
+  string mount_path = 3;
+  string plugin = 4;
+}

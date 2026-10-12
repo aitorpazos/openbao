@@ -34,6 +34,7 @@ var wcAdjacentNonSlashRegEx = regexp.MustCompile(`\+[^/]|[^/]\+`).MatchString
 
 // Router is used to do prefix based routing of a request to a logical backend
 type Router struct {
+	eventSink          logical.EventSender
 	l                  sync.RWMutex
 	root               *radix.Tree
 	mountUUIDCache     *radix.Tree
@@ -225,6 +226,7 @@ func (r *Router) Mount(backend logical.Backend, prefix string, mountEntry *Mount
 	}
 
 	r.root.Insert(prefix, re)
+	r.installEventSink(re)
 	r.storagePrefix.Insert(re.StoragePrefix, re)
 	r.mountUUIDCache.Insert(re.MountEntry.UUID, re.MountEntry)
 	r.mountAccessorCache.Insert(re.MountEntry.Accessor, re.MountEntry)

@@ -63,6 +63,21 @@ func runSpecs(client *http.Client, target, token string, specs []Spec) []Result 
 // case requests capture. Named capture slots live in capturedData, which is
 // shared across the cases of one spec file.
 func runCase(client *http.Client, target, token string, capturedData map[string]string, feature string, c Case) (string, int, string, string) {
+	if c.Subscribe != nil {
+		return runSubscribeCase(client, target, token, capturedData, feature, c)
+	}
+	if c.Request.Method == "" && len(c.Actions) > 0 {
+		// Actions-only case: run each action with the documented
+		// expectations; the case passes when every action passes.
+		for i, a := range c.Actions {
+			ac := Case{ID: fmt.Sprintf("%s#action-%d", c.ID, i), Request: a.Request, Expect: a.Expect}
+			verdict, status, detail, _ := runCase(client, target, token, capturedData, "", ac)
+			if verdict != "PASS" {
+				return verdict, status, detail, ""
+			}
+		}
+		return "PASS", 0, "all actions succeeded", ""
+	}
 	captured := ""
 	var payload []byte
 	if c.Request.BodyRaw != "" {
@@ -204,6 +219,237 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		}
 	}
 	return "PASS", status, fmt.Sprintf("HTTP %d; all assertions matched", status), captured
+}
+
+// runSubscribeCase opens a documented WebSocket subscription, performs the
+// case actions while the stream is open, and evaluates the event
+// expectations over the delivery window.
+func runSubscribeCase(client *http.Client, target, token string, capturedData map[string]string, feature string, c Case) (string, int, string, string) {
+	s := c.Subscribe
+	substitute := func(v string) string {
+		out, err := substituteCaptured(v, capturedData)
+		if err != nil {
+			return v
+		}
+		if str, ok := out.(string); ok {
+			return str
+		}
+		return v
+	}
+	sub := SubscribeSpec{Type: substitute(s.Type), JSON: s.JSON, Filter: substitute(s.Filter), Namespaces: s.Namespaces, TimeoutSeconds: s.TimeoutSeconds}
+
+	effectiveToken := token
+	switch use := c.UseCapturedToken.(type) {
+	case bool:
+		if use && capturedData["token"] != "" {
+			effectiveToken = capturedData["token"]
+		}
+	case string:
+		if use != "" {
+			if named, ok := capturedData[use]; ok {
+				effectiveToken = named
+			} else {
+				return "ERROR", 0, "unknown capture slot " + use, ""
+			}
+		}
+	}
+	if c.NoAuth {
+		effectiveToken = ""
+	}
+
+	params := url.Values{}
+	if sub.JSON {
+		params.Set("json", "true")
+	}
+	if sub.Filter != "" {
+		params.Set("filter", sub.Filter)
+	}
+	for _, ns := range sub.Namespaces {
+		params.Add("namespaces", ns)
+	}
+	qs := ""
+	if enc := params.Encode(); enc != "" {
+		qs = "?" + enc
+	}
+	wsURL := strings.TrimRight(target, "/") + "/v1/sys/events/subscribe/" + sub.Type + qs
+
+	resp, conn, err := wsDial(wsURL, effectiveToken, nil, 30*time.Second)
+	if err != nil {
+		return "ERROR", 0, "websocket dial: " + err.Error(), ""
+	}
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	if conn == nil {
+		// Rejection before the upgrade: evaluate documented status expectations.
+		expected404 := false
+		for _, want := range c.Expect.Status {
+			if want == 404 || want == 405 || want == 415 {
+				expected404 = true
+				break
+			}
+		}
+		if (status == 404 || status == 405 || status == 415) && feature != "" && !expected404 {
+			return "FEATURE_ABSENT", status, fmt.Sprintf("HTTP %d (feature %s)", status, feature), ""
+		}
+		for _, want := range c.Expect.Status {
+			if status == want {
+				return "PASS", status, fmt.Sprintf("HTTP %d; subscription rejected as expected", status), ""
+			}
+		}
+		return "FAIL", status, fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status), ""
+	}
+	defer conn.close()
+	if len(c.Expect.Status) > 0 {
+		accepted := false
+		for _, want := range c.Expect.Status {
+			if status == want {
+				accepted = true
+			}
+		}
+		if !accepted {
+			return "FAIL", status, fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status), ""
+		}
+	}
+
+	window := time.Duration(sub.TimeoutSeconds) * time.Second
+	deadline := time.Now().Add(window)
+	pump := conn.pump(deadline)
+
+	// Run the documented actions while subscribed.
+	for i, a := range c.Actions {
+		ac := Case{ID: fmt.Sprintf("%s#action-%d", c.ID, i), Request: a.Request, Expect: a.Expect}
+		verdict, _, detail, _ := runCase(client, target, token, capturedData, "", ac)
+		if verdict == "ERROR" {
+			return "ERROR", status, "action " + detail, ""
+		}
+		if verdict == "FAIL" {
+			return "FAIL", status, "action failed: " + detail, ""
+		}
+	}
+
+	// Drain the delivery window.
+	matched := false
+	collect := make([]string, 0, 4)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		select {
+		case ev := <-pump.events:
+			verdict, detail := evaluateEvent(ev, c)
+			if verdict == "FAIL" {
+				return "FAIL", status, detail, ""
+			}
+			if verdict == "PASS" && !matched {
+				matched = true
+				_ = detail
+				if len(c.ExpectNoEvent) == 0 {
+					return "PASS", status, detail, ""
+				}
+				// Keep draining to check no_event assertions; the first
+				// matching event already satisfied expect_event.
+			} else if verdict == "SKIP" {
+				collect = append(collect, detail)
+			}
+		case err := <-pump.errs:
+			if err != nil && !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "deadline") {
+				return "ERROR", status, "stream: " + err.Error(), ""
+			}
+		}
+	}
+	if c.ExpectEvent != nil && !matched {
+		return "FAIL", status, fmt.Sprintf("no matching event within %ds (%d other events observed)", sub.TimeoutSeconds, len(collect)), ""
+	}
+	return "PASS", status, "subscription window closed with all expectations met", ""
+}
+
+// evaluateEvent inspects one delivered event against the case expectations.
+// Returns PASS when it satisfies expect_event, FAIL when it violates an
+// expect_no_event assertion, and SKIP when it is unrelated to either.
+func evaluateEvent(ev wsEvent, c Case) (string, string) {
+	if c.ExpectEvent != nil && c.ExpectEvent.Binary {
+		if len(ev.payload) == 0 {
+			return "FAIL", "binary event empty"
+		}
+		if jsonExtractable(ev.payload) {
+			return "FAIL", "expected protobuf binary delivery but payload parses as JSON"
+		}
+		return "PASS", "binary event received (non-JSON payload)"
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(ev.payload, &parsed); err != nil {
+		return "FAIL", fmt.Sprintf("event not parseable as JSON: %v (%q)", err, string(ev.payload))
+	}
+	if c.ExpectEvent != nil {
+		match, detail := eventMatches(parsed, c.ExpectEvent)
+		if match {
+			return "PASS", detail
+		}
+		return "SKIP", detail
+	}
+	for i, ne := range c.ExpectNoEvent {
+		if match, detail := eventMatches(parsed, &ne); match {
+			return "FAIL", fmt.Sprintf("expect_no_event[%d] violated: %s", i, detail)
+		}
+	}
+	return "SKIP", "event does not match any expect_no_event criterion"
+}
+
+func eventMatches(parsed map[string]any, ee *ExpectEvent) (bool, string) {
+	data, _ := parsed["data"].(map[string]any)
+	if data == nil {
+		return false, "event data missing"
+	}
+	eventType, _ := data["event_type"].(string)
+	if eventType != ee.Type {
+		return false, fmt.Sprintf("type %q != %q", eventType, ee.Type)
+	}
+	event, _ := data["event"].(map[string]any)
+	if event == nil {
+		return false, "data.event missing"
+	}
+	if ee.Envelope != nil {
+		for k, want := range ee.Envelope {
+			switch k {
+			case "specversion":
+				if got, _ := parsed["specversion"].(string); got != want {
+					return false, fmt.Sprintf("specversion %q != %q", got, want)
+				}
+			case "datacontentype":
+				if got, _ := parsed["datacontentype"].(string); got != want {
+					return false, fmt.Sprintf("datacontentype %q != %q", got, want)
+				}
+			case "source_prefix":
+				got, _ := parsed["source"].(string)
+				if !strings.HasPrefix(got, want) {
+					return false, fmt.Sprintf("source %q lacks prefix %q", got, want)
+				}
+			}
+		}
+	}
+	if ee.Metadata != nil {
+		meta, _ := event["metadata"].(map[string]any)
+		if meta == nil {
+			return false, "data.event.metadata missing"
+		}
+		for k, want := range ee.Metadata {
+			got, ok := meta[k]
+			if !ok {
+				return false, fmt.Sprintf("metadata[%q] missing", k)
+			}
+			gotStr, isStr := got.(string)
+			if !isStr {
+				gotStr = fmt.Sprint(got)
+			}
+			if gotStr != want {
+				return false, fmt.Sprintf("metadata[%q] = %q != %q", k, gotStr, want)
+			}
+		}
+	}
+	return true, fmt.Sprintf("event %s matched all assertions", ee.Type)
 }
 
 // nameRegexp matches bare capture identifiers: $token, $entity_id. Digits
