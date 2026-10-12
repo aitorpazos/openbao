@@ -29,7 +29,7 @@ cases:
   - id: mount-setup
     request:
       method: POST
-      path: /v1/sys/mounts/sr-kv
+      path: /v1/sys/mounts/kv
       body: {type: kv, options: {version: 2}}
     expect:
       status: [204, 400]
@@ -204,6 +204,6 @@ cases:
   - id: cleanup-mount
     request:
       method: DELETE
-      path: /v1/sys/mounts/sr-kv
+      path: /v1/sys/mounts/kv
     expect:
       status: [204]
