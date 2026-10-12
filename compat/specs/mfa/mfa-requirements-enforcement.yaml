@@ -27,12 +27,37 @@ notes: >-
   first. Cleanup leaves userpass enabled on purpose.
 cases:
   - id: mount-setup
+    note: |
+      A prior run may have left a non-versioned sr-kv mount; delete it
+      first so the v2 mount never has to upgrade in place (the upgrade
+      window 400s concurrent writes). Namespace- and mount-removal on the
+      fork are asynchronous, so sleep after the delete.
+    sleep_ms: 3000
+    actions:
+      - request:
+          method: DELETE
+          path: /v1/sys/mounts/sr-kv
+        expect: {status: [204, 400, 404]}
+  - id: mount-setup-create
     request:
       method: POST
       path: /v1/sys/mounts/sr-kv
       body: {type: kv, options: {version: 2}}
     expect:
       status: [204, 400]
+  - id: mount-setup-settle
+    note: wait for asynchronous mount teardown/recreation to settle.
+    sleep_ms: 3000
+    request:
+      method: GET
+      path: /v1/sys/seal-status
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [sealed]
+        properties:
+          sealed: {type: boolean}
   - id: enable-userpass
     request:
       method: POST
