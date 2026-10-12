@@ -180,7 +180,17 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		}
 	}
 	if !accepted {
-		return "FAIL", status, fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status), captured
+		detail := fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status)
+		// Surface a short response excerpt so fixture-gate failures show
+		// the server's actual error instead of just the status code.
+		if len(b) > 0 {
+			snippet := string(b)
+			if len(snippet) > 180 {
+				snippet = snippet[:180]
+			}
+			detail += "; body: " + snippet
+		}
+		return "FAIL", status, detail, captured
 	}
 	if c.Expect.Body.Kind != 0 && len(b) != 0 {
 		return "FAIL", status, "expected empty body", captured

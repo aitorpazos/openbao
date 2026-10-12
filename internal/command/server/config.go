@@ -217,6 +217,11 @@ ui = true
 	if err != nil {
 		return nil, fmt.Errorf("error parsing dev config: %w", err)
 	}
+	// Dev mode mirrors upstream Vault behaviour where audit devices are
+	// managed through the API; the fork's declarative-only restriction is
+	// a production hardening measure and is relaxed here so the documented
+	// audit API surface stays exercisable in dev.
+	parsed.UnsafeAllowAPIAuditCreation = true
 	return parsed, nil
 }
 
