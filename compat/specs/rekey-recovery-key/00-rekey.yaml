@@ -115,7 +115,7 @@ cases:
       body: {nonce: not-the-operation-nonce}
     expect: *invalid
   - id: cleanup-cancel-rekey
-    depends: [progress-unchanged-after-rejections, cancel-nonce-mismatch-rejected]
+    depends: [recovery-seal-fixture, progress-unchanged-after-rejections, cancel-nonce-mismatch-rejected]
     request:
       method: DELETE
       path: /v1/sys/rekey-recovery-key/init

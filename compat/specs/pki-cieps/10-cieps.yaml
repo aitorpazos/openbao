@@ -1,0 +1,287 @@
+# SPDX-License-Identifier: MPL-2.0
+api: pki-certificate-issuance-external-policy-service
+feature: pki-cieps
+source: https://developer.hashicorp.com/vault/docs/secrets/pki/cieps
+source_version: "v2.x (latest)"
+notes: >-
+  Wire contract for the Certificate Issuance External Policy Service (CIEPS)
+  documented at the URL above (v2.x latest). Config paths and standard
+  issuance response fields also draw on
+  https://developer.hashicorp.com/vault/api-docs/secret/pki (v2.x latest).
+  Mount lifecycle: https://developer.hashicorp.com/vault/api-docs/system/mounts.
+  Status/errors: https://developer.hashicorp.com/vault/api-docs#http-status-codes
+  and #error-response. All sources v2.x (latest).
+
+  Licensed disposable target, administrative token. compat-pkica-cieps is
+  mounted by mount-enable (any pre-existing mount from a prior partial run is
+  removed first) and removed by cleanup-unmount. cieps-ca.pem / cieps-leaf.csr
+  are the trust anchor and client CSR matching the stand-alone TLS mock service
+  (compat/harness/ciepsmock) implementing the documented webhook contract on
+  127.0.0.1:8433 (status endpoint on 127.0.0.1:8434). The mock is manual
+  provisioning: it is not started or stopped by this suite; notes.md documents
+  the mock-mode scenarios (error-only, cert+error warnings, non-JSON body,
+  request-UUID mismatch, non-200 status, store+lease, disabled service) that
+  require URL reconfiguration between cases and were live-verified.
+
+  Live-verified semantics beyond this suite's wire assertions (openssl on a
+  dev server, 2026-10-12): the re-signed certificate verifies against the
+  issuing CA (openssl verify OK); its public key equals the CSR's public key
+  (sign) or the response private key's public key (issue, rsa and ec); the
+  final Issuer DN equals the issuing CA's Subject DN and the AKI is replaced
+  by the issuer's SKI per RFC 5280.
+cases:
+  - id: cleanup-prior-mount
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-cieps}
+    expect: {status: [204, 400]}
+  - id: mount-enable
+    depends: [cleanup-prior-mount]
+    request: {method: POST, path: /v1/sys/mounts/compat-pkica-cieps, body: {type: pki}}
+    expect: {status: [200, 204]}
+  - id: cieps-read-default
+    depends: [mount-enable]
+    request: {method: GET, path: /v1/compat-pkica-cieps/config/external-policy}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [enabled, external_service_url, trusted_ca,
+                       external_service_validated, external_service_last_updated,
+                       timeout, entity_jmespath, group_jmespath]
+            properties:
+              enabled: {type: boolean, const: false}
+  - id: cieps-reject-insecure-url
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/config/external-policy
+      body: {external_service_url: "http://insecure.example"}
+    expect:
+      status: [400]
+      errors_contain: ["external_service_url must be an HTTPS URL"]
+  - id: cieps-reject-enable-without-trust
+    depends: [mount-enable]
+    note: >-
+      Enabling the service without a trust bundle is rejected: the service
+      connection cannot be authenticated without one. With a CA present but
+      unparseable, enabling is rejected with "invalid trust certificate
+      bundle" (live-verified).
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/config/external-policy
+      body: {enabled: true, external_service_url: "https://127.0.0.1:8433"}
+    expect:
+      status: [400]
+      errors_contain: ["trusted_ca or trusted_leaf_certificate_bundle is required"]
+  - id: cieps-config-enable
+    depends: [cieps-reject-insecure-url, cieps-reject-enable-without-trust]
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/config/external-policy
+      body:
+        enabled: true
+        external_service_url: "https://127.0.0.1:8433"
+        trusted_ca: |
+          -----BEGIN CERTIFICATE-----
+          MIIC8DCCAdigAwIBAgIUGtsoMOoMqrZDaEm10G07Rv4EZGIwDQYJKoZIhvcNAQEL
+          BQAwGDEWMBQGA1UEAwwNQ0lFUFMgTW9jayBDQTAeFw0yNjEwMTIwODQ0NTRaFw0y
+          NjEwMTQwODQ0NTRaMBgxFjAUBgNVBAMMDUNJRVBTIE1vY2sgQ0EwggEiMA0GCSqG
+          SIb3DQEBAQUAA4IBDwAwggEKAoIBAQC4hbOIsQuT71wzk08IgW+kTHLLiS7INuRV
+          44ZDnb14l5dUlC5O4Lo8gd2+1aY0aGuqSk0hCBMw1j1CLJnvejghS7PsURhmA8fS
+          /v5D9QRYUf1oyQ34tnCC2EiINmNAkKjPekeK7frjQ8i4FfoBuhkLr11iyhTDLccy
+          6wWm5ZJ7u74eBG6lfRXdFIpd/PmgBusjMRHVXFKVPqK4PEPeZOCEvWpDCyFT3lAg
+          1sUKRbPgndE++j6ND+aR3g/IGhvkG7drgaiv6guMf7pVUFcaXoxmbOsgKTI1ty0J
+          uwCiPoEopUZkXVl7YyQi3QSv0WL4FAUBpbdsFNVHERmbPI7eUqVbAgMBAAGjMjAw
+          MB0GA1UdDgQWBBS99Pi6OEBrJY83e4v5Q4xY61PdXzAPBgNVHRMBAf8EBTADAQH/
+          MA0GCSqGSIb3DQEBCwUAA4IBAQBSNnTiWrgqLztFFKgvf3T7pGhG9FachNTNS8uQ
+          a5emC8Z6dc5UsBJF/84xj2638e++PBx1BBYyxmtQJYXuF/F/Kvy7ub/eUop+7Tih
+          28pGWWtA9ka4Bg/DUXhWe46Dt6hRymHgMxr4Td3lJUQJheU4Vy+ZLrZQ+hyygfTh
+          Hzdjxq5CvWeCwzrVHpMaCGUuYDPCv1CK8FRrv0uUSmFKvFVazhXmSJsSRxf649Za
+          qus4ukHGLgNpx3rsyCGnonfQv1pNUa/oslyOSAjCBdJRJzCTRMYOFxi0GSRIFewA
+          6BhKJ23Zemjb2CPeAwxOPYyfAZTEZhL2aAq2y0W//JlHGThC
+          -----END CERTIFICATE-----
+    expect: {status: [200, 204]}
+  - id: cieps-config-roundtrip
+    depends: [cieps-config-enable]
+    request: {method: GET, path: /v1/compat-pkica-cieps/config/external-policy}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        properties:
+          data:
+            type: object
+            required: [enabled, external_service_url, external_service_validated,
+                       external_service_last_updated, timeout]
+            properties:
+              enabled: {type: boolean, const: true}
+              external_service_url: {type: string, const: "https://127.0.0.1:8433"}
+              external_service_validated: {type: boolean}
+              external_service_last_updated: {type: string}
+              timeout: {type: number}
+  - id: cieps-root-issuer
+    depends: [cieps-config-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/root/generate/internal
+      body: {common_name: cieps-root.example, ttl: 24h, issuer_name: cieps-root}
+    expect: {status: [200]}
+    capture: {issuer_id: data.issuer_id}
+  - id: cieps-sign-accepted
+    depends: [cieps-root-issuer]
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/external-policy/sign
+      body:
+        csr: |
+          -----BEGIN CERTIFICATE REQUEST-----
+          MIICYjCCAUoCAQAwHTEbMBkGA1UEAwwSbGVhZi5jaWVwcy5leGFtcGxlMIIBIjAN
+          BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3JstB6BqkWjDk246xdzHXl/qg1z3
+          KuyI65Lbymo2d/MDD7K1NxuxLubUpx9vBs/6GHA4twbtmlv6rgppcNJzzhz2B9e7
+          LjR7n+t0+DSIQw1oLNlEAes9iNhGKA0zmJjjY5bYntOyQgW0g5PJNLfDj8NpBg37
+          eqDrQLzMuMH/Krd/w+2FM32e98N+P8smHXA3Z+d9HcEW5wvlxDKxxFjodmVDklX6
+          alW9vnps/4vg33ZakL+gGaZlbZKvjIiBAqCCl1+0fiOluvS6pfbQ2hF4ZLRsxfkM
+          STArNkTiA2vN8UrmwI4erenLxFiSXEEWN/L0KVlLj7ZTd03Ecip+p5qrmwIDAQAB
+          oAAwDQYJKoZIhvcNAQELBQADggEBAA8iLkvMvv4jdnXrlO1WFOoe1XbxNxsrcT/K
+          wVJh3/gGBXKkBFmJrEnmiOPO6XKThG4x9yq1zEsjPnLSjZmTkVPUycj7fTV2LZtW
+          kKb4S2Bv5reHEWOSJBrWCVPF2wssBFEVD7fQEpy93Sdep5KNAYwHbmwq6ymuRsjq
+          xKybXQrVwSjqaUIyF8h8PP0G+m6Zs5pd1ZR2VtA121QwWmcmiIIYCSpmG2pjiXwu
+          vx7eC+EXCLxbl4Ucx86bdX/VVVes0J2xls1uK4ws37SPoAiYiVk4HQHJ75hCM9Cf
+          XAf/SL0nrtjM/QryFGfsI2TWgTpsI1WiEB/ELaam/d53PafTcTE=
+          -----END CERTIFICATE REQUEST-----
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [certificate, issuing_ca, serial_number, expiration, not_before]
+            properties:
+              certificate: {type: string}
+              issuing_ca: {type: string}
+              serial_number: {type: string}
+              expiration: {type: number}
+              not_before: {type: number}
+    note: >-
+      Live-verified: the re-signed certificate verifies against the issuing
+      CA, its public key equals the CSR's, the Issuer DN equals
+      CN=cieps-root.example and the AKI is the issuer's SKI.
+  - id: cieps-issue-generated-key
+    depends: [cieps-root-issuer]
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/external-policy/issue
+      body: {common_name: issue.cieps.example, key_type: rsa, key_bits: 2048}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [certificate, private_key, private_key_type, issuing_ca, serial_number]
+            properties:
+              private_key_type: {type: string, const: rsa}
+    note: >-
+      Live-verified: private_key parses with openssl pkey and its public key
+      equals the certificate's; no lease_id is returned when the service does
+      not request one.
+  - id: cieps-issue-ec
+    depends: [cieps-root-issuer]
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/external-policy/issue
+      body: {common_name: ec.cieps.example, key_type: ec, key_bits: 256}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [certificate, private_key]
+            properties:
+              private_key_type: {type: string, const: ec}
+    note: Live-verified with the same openssl checks as the rsa case.
+  - id: cieps-invalid-csr-rejected
+    depends: [cieps-root-issuer]
+    request:
+      method: POST
+      path: /v1/compat-pkica-cieps/external-policy/sign
+      body: {csr: "not-a-csr"}
+    expect: {status: [400]}
+  - id: cieps-disabled-friendly-error
+    depends: [cieps-invalid-csr-rejected]
+    note: >-
+      Disables the service, signs with a valid CSR, then re-enables. The
+      friendly 400 explains the service is not enabled (live-verified).
+    actions:
+      - request: {method: POST, path: /v1/compat-pkica-cieps/config/external-policy, body: {enabled: false}}
+        expect: {status: [200, 204]}
+      - request:
+          method: POST
+          path: /v1/compat-pkica-cieps/external-policy/sign
+          body:
+            csr: |
+              -----BEGIN CERTIFICATE REQUEST-----
+              MIICYjCCAUoCAQAwHTEbMBkGA1UEAwwSbGVhZi5jaWVwcy5leGFtcGxlMIIBIjAN
+              BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3JstB6BqkWjDk246xdzHXl/qg1z3
+              KuyI65Lbymo2d/MDD7K1NxuxLubUpx9vBs/6GHA4twbtmlv6rgppcNJzzhz2B9e7
+              LjR7n+t0+DSIQw1oLNlEAes9iNhGKA0zmJjjY5bYntOyQgW0g5PJNLfDj8NpBg37
+              eqDrQLzMuMH/Krd/w+2FM32e98N+P8smHXA3Z+d9HcEW5wvlxDKxxFjodmVDklX6
+              alW9vnps/4vg33ZakL+gGaZlbZKvjIiBAqCCl1+0fiOluvS6pfbQ2hF4ZLRsxfkM
+              STArNkTiA2vN8UrmwI4erenLxFiSXEEWN/L0KVlLj7ZTd03Ecip+p5qrmwIDAQAB
+              oAAwDQYJKoZIhvcNAQELBQADggEBAA8iLkvMvv4jdnXrlO1WFOoe1XbxNxsrcT/K
+              wVJh3/gGBXKkBFmJrEnmiOPO6XKThG4x9yq1zEsjPnLSjZmTkVPUycj7fTV2LZtW
+              kKb4S2Bv5reHEWOSJBrWCVPF2wssBFEVD7fQEpy93Sdep5KNAYwHbmwq6ymuRsjq
+              xKybXQrVwSjqaUIyF8h8PP0G+m6Zs5pd1ZR2VtA121QwWmcmiIIYCSpmG2pjiXwu
+              vx7eC+EXCLxbl4Ucx86bdX/VVVes0J2xls1uK4ws37SPoAiYiVk4HQHJ75hCM9Cf
+              XAf/SL0nrtjM/QryFGfsI2TWgTpsI1WiEB/ELaam/d53PafTcTE=
+              -----END CERTIFICATE REQUEST-----
+        expect:
+          status: [400]
+          errors_contain: ["the external policy service is not enabled"]
+      - request:
+          method: POST
+          path: /v1/compat-pkica-cieps/config/external-policy
+          body:
+            enabled: true
+            external_service_url: "https://127.0.0.1:8433"
+            trusted_ca: |
+              -----BEGIN CERTIFICATE-----
+              MIIC8DCCAdigAwIBAgIUGtsoMOoMqrZDaEm10G07Rv4EZGIwDQYJKoZIhvcNAQEL
+              BQAwGDEWMBQGA1UEAwwNQ0lFUFMgTW9jayBDQTAeFw0yNjEwMTIwODQ0NTRaFw0y
+              NjEwMTQwODQ0NTRaMBgxFjAUBgNVBAMMDUNJRVBTIE1vY2sgQ0EwggEiMA0GCSqG
+              SIb3DQEBAQUAA4IBDwAwggEKAoIBAQC4hbOIsQuT71wzk08IgW+kTHLLiS7INuRV
+              44ZDnb14l5dUlC5O4Lo8gd2+1aY0aGuqSk0hCBMw1j1CLJnvejghS7PsURhmA8fS
+              /v5D9QRYUf1oyQ34tnCC2EiINmNAkKjPekeK7frjQ8i4FfoBuhkLr11iyhTDLccy
+              6wWm5ZJ7u74eBG6lfRXdFIpd/PmgBusjMRHVXFKVPqK4PEPeZOCEvWpDCyFT3lAg
+              1sUKRbPgndE++j6ND+aR3g/IGhvkG7drgaiv6guMf7pVUFcaXoxmbOsgKTI1ty0J
+              uwCiPoEopUZkXVl7YyQi3QSv0WL4FAUBpbdsFNVHERmbPI7eUqVbAgMBAAGjMjAw
+              MB0GA1UdDgQWBBS99Pi6OEBrJY83e4v5Q4xY61PdXzAPBgNVHRMBAf8EBTADAQH/
+              MA0GCSqGSIb3DQEBCwUAA4IBAQBSNnTiWrgqLztFFKgvf3T7pGhG9FachNTNS8uQ
+              a5emC8Z6dc5UsBJF/84xj2638e++PBx1BBYyxmtQJYXuF/F/Kvy7ub/eUop+7Tih
+              28pGWWtA9ka4Bg/DUXhWe46Dt6hRymHgMxr4Td3lJUQJheU4Vy+ZLrZQ+hyygfTh
+              Hzdjxq5CvWeCwzrVHpMaCGUuYDPCv1CK8FRrv0uUSmFKvFVazhXmSJsSRxf649Za
+              qus4ukHGLgNpx3rsyCGnonfQv1pNUa/oslyOSAjCBdJRJzCTRMYOFxi0GSRIFewA
+              6BhKJ23Zemjb2CPeAwxOPYyfAZTEZhL2aAq2y0W//JlHGThC
+              -----END CERTIFICATE-----
+        expect: {status: [200, 204]}
+  - id: cleanup-unmount
+    depends: [cieps-disabled-friendly-error]
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-cieps}
+    expect: {status: [204]}
+  - id: cleanup-verify-gone
+    depends: [cleanup-unmount]
+    note: >-
+      Reading a nonexistent mount path reports "No secret engine mount at
+      <path>/" with 400 (upstream Vault behavior), not 404.
+    request: {method: GET, path: /v1/sys/mounts/compat-pkica-cieps}
+    expect: {status: [400]}

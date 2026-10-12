@@ -114,6 +114,9 @@ func storedIssuanceConfig(path string, fields map[string]*framework.FieldSchema,
 			return nil, err
 		}
 		delete(config, "vault_client_cert_bundle")
+		if path == "config/external-policy" {
+			return &logical.Response{Data: config}, nil
+		}
 		return &logical.Response{Data: config, Warnings: []string{"Configuration only; protocol enrollment, Sentinel evaluation and external policy requests are not implemented."}}, nil
 	}
 	return &framework.Path{Pattern: path, Fields: fields, Operations: map[logical.Operation]framework.OperationHandler{
@@ -146,9 +149,6 @@ func pathExternalPolicyConfig() *framework.Path {
 		d := &framework.FieldData{Raw: c, Schema: fields}
 		if d.Get("timeout").(int) <= 0 {
 			return "timeout must be positive"
-		}
-		if c["enabled"] == true {
-			return "external policy requests are not implemented; configuration must remain disabled"
 		}
 		return ""
 	})

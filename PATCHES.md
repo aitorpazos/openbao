@@ -453,3 +453,62 @@ Deviations/limits (documented in `raft_snapshot_load_notes.md`):
 - Restoring the snapshot into live storage remains the separate, documented
   `snapshot-force` surface; not reused here (docs say snapshot-load loads
   without overwriting).
+
+## CIEPS — Certificate Issuance External Policy Service (2026-10-12)
+
+Implements the documented CIEPS webhook contract
+(https://developer.hashicorp.com/vault/docs/secrets/pki/cieps, v2.x latest):
+
+- `internal/builtin/logical/pki/cieps.go`: request/response structures
+  (request_version 1, synchronous, user/identity/vault request key values),
+  TLS client from the configured trust bundle (CA chain or pinned leaf) or
+  client certificates, request_uuid echo validation, and the re-signing
+  machinery: the service's certificate signature is ignored; the TBS is
+  re-marshaled with the issuing issuer's AIA/CRL-DP URLs, Authority Key
+  Identifier (RFC 5280) and Issuer DN, and the TBS's inner signature
+  AlgorithmIdentifier is rewritten to the issuer's (RFC 5280 requires inner
+  == outer). Signature algorithms are derived byte-exactly from throwaway
+  certificates (cached) including PSS/ML-DSA; TBS signing uses
+  crypto.SignMessage where available.
+- `internal/builtin/logical/pki/path_extpolicy_issue_sign.go`: the six
+  documented paths `pki/external-policy/{sign,issue,sign-intermediate}`
+  (+ `pki/issuer/:issuer_ref/external-policy/...` variants). Issue mode
+  generates key material and builds the CSR on the user's behalf
+  (`vault_generated_private_key=true` documented); user parameters are
+  forwarded verbatim in `user_request_key_values`; the documented
+  `vault_request_key_values` fields are assembled (issuance_mode, mount,
+  policy_name, requested_issuer_*, requested_issuance_config,
+  vault_is_performance_*). Responses follow the documented semantics: only
+  one of error/certificate (both -> error becomes a warning), non-200
+  surfaces only the status code, issuer_ref override re-resolves the
+  issuer, store_certificate + generate_lease (lease requires store) are
+  honored. Response shape is the standard PEM certutil bundle by default.
+- `internal/builtin/logical/pki/path_issuance_config.go`:
+  `pki/config/external-policy` CRUD — enabled (disabling clears the stored
+  URL), HTTPS-only URL when enabled, `trusted_ca` / trusted leaf bundle
+  validation, timeout/entity_jmespath/group_jmespath,
+  external_service_last_updated timestamping, validated flag.
+- `compat/harness/ciepsmock/`: stand-alone TLS mock implementing the
+  documented contract (signing CA generated at startup since x509 requires
+  parent/key agreement even when Vault ignores the signature), with
+  error/both/nonjson/mismatch/status/store/lease modes and a status
+  endpoint for request verification.
+- Spec `compat/specs/pki-cieps/` (15 cases, all PASS) + notes.md with the
+  live-verified mock-mode matrix (error-only 400 verbatim message, both ->,
+  non-JSON, UUID mismatch, non-200 status-only, store+lease, disabled
+  service 400) and openssl-verified re-signing semantics.
+
+Deviations/limits (documented in `compat/specs/pki-cieps/notes.md`):
+
+- Identity request key values carry entity_id only; the full resolved
+  logical.Entity/groups with jmespath projection is deferred (needs the
+  identity store wiring).
+- ACME-backed CIEPS flows are out of scope of the spec (ACME directory
+  variants are covered by pki-transit-ent); the ica issuance_mode path
+  shares the re-signing machinery.
+- The mock cannot be started/stopped by the harness (manual provisioning
+  documented); mock-mode cases therefore live in notes.md rather than the
+  auto-run suite.
+- encoding/asn1 marshaling honors a set RawContent field verbatim — the
+  re-signing code clears the TBS RawContent before re-marshaling so
+  mutations (AIA/AKI/Issuer/inner signature algorithm) take effect.

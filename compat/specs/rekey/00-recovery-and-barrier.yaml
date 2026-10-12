@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MPL-2.0
 api: sys-rekey-and-rekey-recovery-key
-feature: rekey-recovery-key
+feature: rekey
 source: https://developer.hashicorp.com/vault/api-docs/system/rekey-recovery-key
 source_version: v2.x (latest)
 notes: >-
