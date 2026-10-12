@@ -1,0 +1,267 @@
+# SPDX-License-Identifier: MPL-2.0
+api: pki-enterprise-ca-key-migration
+feature: pki-ca-key-migration
+source: https://developer.hashicorp.com/vault/api-docs/secret/pki
+source_version: "v2.x (latest)"
+notes: |
+  CA key export/import for cross-cluster migration: POST
+  /pki/keys/:key_ref/export ("Export CA key") and the wrapped_key +
+  export_key_hmac import path on POST /pki/keys/import. The export wraps the
+  CA private key to a caller-supplied public key created on the destination
+  mount ("Create export key", POST /pki/export). Requires root/sudo; managed
+  (external) keys are documented as unsupported.
+  Deviations: the wrapping envelope format is clean-room (AES-256-GCM CEK,
+  RSA-OAEP-256 / ECDH-ES+HKDF-SHA256 per recipient key type) — not asserted
+  against a real Enterprise wire blob. export_key_hmac is a deterministic
+  sha256 of the recipient public key DER ("sha256:"-prefixed), derivable on
+  both mounts; the doc sample value is a placeholder. ml-kem-768/1024
+  recipients are documented upstream but not implemented (400). The import
+  response key_type reflects the CA key type.
+cases:
+  - id: mount-source-preclean
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entsrc}
+    expect: {status: [200, 204, 400, 404]}
+    sleep_ms: 2000
+  - id: mount-source
+    depends: [mount-source-preclean]
+    request: {method: POST, path: /v1/sys/mounts/compat-pkica-entsrc, body: {type: pki}}
+    expect: {status: [200, 204]}
+  - id: mount-destination
+    depends: [mount-source]
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entdst}
+    expect: {status: [200, 204, 400, 404]}
+    sleep_ms: 2000
+  - id: mount-destination-create
+    depends: [mount-destination]
+    request: {method: POST, path: /v1/sys/mounts/compat-pkica-entdst, body: {type: pki}}
+    expect: {status: [200, 204]}
+  - id: source-ca
+    depends: [mount-source]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entsrc/issuers/generate/root/internal
+      body: {common_name: src.example, ttl: 24h}
+    expect: {status: [200]}
+  - id: destination-ca
+    depends: [mount-destination-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entdst/issuers/generate/root/internal
+      body: {common_name: dst.example, ttl: 24h}
+    expect: {status: [200]}
+  - id: destination-export-key-create
+    depends: [destination-ca]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entdst/export
+      body: {key_type: ec-p256, name: compat-ent-mig}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [export_key_uuid, key_type, public_key, export_key_hmac, created_at]
+            properties:
+              export_key_uuid: {type: string}
+              key_type: {type: string}
+              public_key: {type: string, pattern: '-----BEGIN PUBLIC KEY-----'}
+              export_key_hmac: {type: string}
+              created_at: {type: string}
+    capture: {dst_pubkey: data.public_key}
+  - id: source-export-ca-key
+    depends: [destination-export-key-create, source-ca]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entsrc/keys/default/export
+      body: {public_key: $dst_pubkey}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [ca_key_uuid, wrapped_key, export_key_hmac, exported_at]
+            properties:
+              ca_key_uuid: {type: string}
+              wrapped_key: {type: string}
+              export_key_hmac: {type: string, pattern: '^sha256:'}
+              exported_at: {type: string}
+    capture:
+      wrapped: data.wrapped_key
+      src_hmac: data.export_key_hmac
+  - id: destination-import-wrapped
+    depends: [source-export-ca-key]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entdst/keys/import
+      body:
+        wrapped_key: $wrapped
+        export_key_hmac: $src_hmac
+        key_name: compat-ent-migrated
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [key_id, key_name, key_type]
+            properties:
+              key_id: {type: string}
+              key_name: {type: string}
+              key_type: {type: string}
+    capture: {imported_key_id: data.key_id}
+  - id: destination-keys-list-shows-imported
+    depends: [destination-import-wrapped]
+    request:
+      method: LIST
+      path: /v1/compat-pkica-entdst/keys
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys, key_info]
+            properties:
+              keys: {type: array, items: {type: string}}
+              key_info:
+                type: object
+                required: [$imported_key_id]
+                properties:
+                  $imported_key_id:
+                    type: object
+                    required: [key_name]
+                    properties:
+                      key_name: {type: string}
+  - id: source-export-missing-key
+    depends: [destination-export-key-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entsrc/keys/compat-pkica-no-such-key/export
+      body: {public_key: $dst_pubkey}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: source-export-missing-public-key
+    depends: [source-ca]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entsrc/keys/default/export
+      body: {}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: source-export-invalid-public-key
+    depends: [source-ca]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entsrc/keys/default/export
+      body: {public_key: not-a-pem}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: source-export-unsupported-recipient
+    depends: [source-ca]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entsrc/keys/default/export
+      body: {public_key: "-----BEGIN PUBLIC KEY-----\nZm9vCg==\n-----END PUBLIC KEY-----\n"}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: import-both-pem-and-wrapped
+    depends: [source-export-ca-key]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entdst/keys/import
+      body:
+        pem_bundle: "-----BEGIN TEST KEY-----\nAAECAwQFBgcICQ==\n-----END TEST KEY-----\n"
+        wrapped_key: $wrapped
+        export_key_hmac: $src_hmac
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: import-wrapped-without-hmac
+    depends: [source-export-ca-key]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entdst/keys/import
+      body: {wrapped_key: $wrapped}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: import-wrong-hmac
+    depends: [source-export-ca-key]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entdst/keys/import
+      body:
+        wrapped_key: $wrapped
+        export_key_hmac: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        key_name: compat-ent-wrong
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: import-corrupt-wrapped-key
+    depends: [destination-export-key-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entdst/keys/import
+      body:
+        wrapped_key: bm90LXZhbGlk
+        export_key_hmac: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: cleanup-unmount
+    depends: [destination-keys-list-shows-imported, import-wrong-hmac, import-corrupt-wrapped-key]
+    actions:
+      - request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entsrc}
+        expect: {status: [204]}
+      - request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entdst}
+        expect: {status: [204]}
+      - request: {method: GET, path: /v1/sys/mounts/compat-pkica-entsrc}
+        expect: {status: [200, 400, 404]}
+      - request: {method: GET, path: /v1/sys/mounts/compat-pkica-entdst}
+        expect: {status: [200, 400, 404]}

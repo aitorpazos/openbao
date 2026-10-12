@@ -1,0 +1,272 @@
+# SPDX-License-Identifier: MPL-2.0
+api: pki-enterprise-certificate-metadata-and-batch
+feature: pki-cert-metadata
+source: https://developer.hashicorp.com/vault/api-docs/secret/pki
+source_version: "v2.x (latest)"
+notes: |
+  Certificate metadata storage/retrieval: issue/sign cert_metadata parameter,
+  GET /pki/cert-metadata/:serial, LIST /pki/cert-metadata, and POST
+  /pki/batch/certs ("Read Batch Certificate"). Role's no_store_metadata gates
+  metadata storage. Sources: the linked pki API page (v2.x latest), sections
+  "Read Certificate Metadata", "List Certificate Metadata", "Read Batch
+  Certificate", and the issue/sign cert_metadata parameter descriptions.
+  Deviations: batch/certs serial keys are normalized to the colon form of
+  the issued serial; metadata LIST returns colon-form serials (matching
+  LIST /pki/cert). Entries for tidy-deleted certificates are not
+  auto-removed (tidy_cert_metadata counter is a documented deviation).
+  Storage prefix is not part of the public API contract.
+cases:
+  - id: mount-preclean
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entmeta}
+    expect: {status: [200, 204, 400, 404]}
+    sleep_ms: 3000
+  - id: mount-enable
+    depends: [mount-preclean]
+    request: {method: POST, path: /v1/sys/mounts/compat-pkica-entmeta, body: {type: pki}}
+    expect: {status: [200, 204]}
+  - id: ca-generate
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/issuers/generate/root/internal
+      body: {common_name: compat-pkica-entmeta.example, ttl: 24h}
+    expect: {status: [200]}
+  - id: role-create
+    depends: [ca-generate]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/roles/compat-entmeta-role
+      body: {allowed_domains: [example.com, cieps.example], allow_subdomains: true, max_ttl: 12h}
+    expect: {status: [200, 204]}
+  - id: issue-with-metadata
+    depends: [role-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/issue/compat-entmeta-role
+      body:
+        common_name: meta.example.com
+        ttl: 6h
+        cert_metadata: Y29tcGF0LWVudG1ldGEtdmFsdWU=
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [serial_number, certificate, private_key]
+            properties:
+              serial_number: {type: string}
+    capture: {serial: data.serial_number}
+  - id: metadata-read
+    depends: [issue-with-metadata]
+    request:
+      method: GET
+      path: /v1/compat-pkica-entmeta/cert-metadata/$serial
+    expect:
+      status: [200]
+      exact:
+        data.cert_metadata: Y29tcGF0LWVudG1ldGEtdmFsdWU=
+        data.role: compat-entmeta-role
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [issuer_id, expiration, cert_metadata, role, serial_number]
+            properties:
+              issuer_id: {type: string}
+              expiration: {type: string}
+              cert_metadata: {type: string}
+              role: {type: string}
+              serial_number: {type: string}
+  - id: metadata-read-hyphen-form
+    depends: [issue-with-metadata]
+    request:
+      method: GET
+      path: /v1/compat-pkica-entmeta/cert-metadata/$serial
+    expect:
+      status: [200]
+      exact:
+        data.cert_metadata: Y29tcGF0LWVudG1ldGEtdmFsdWU=
+  - id: metadata-list
+    depends: [issue-with-metadata]
+    request:
+      method: LIST
+      path: /v1/compat-pkica-entmeta/cert-metadata
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [keys]
+            properties:
+              keys: {type: array, items: {type: string}}
+  - id: metadata-missing
+    depends: [issue-with-metadata]
+    request:
+      method: GET
+      path: /v1/compat-pkica-entmeta/cert-metadata/01:02:03:04:05:06:07:08:09:0a:0b:0c:0d:0e:0f:10:11:12:13:14:15
+    expect:
+      status: [404]
+  - id: sign-with-metadata
+    depends: [role-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/sign/compat-entmeta-role
+      body:
+        csr: |
+          -----BEGIN CERTIFICATE REQUEST-----
+          MIICYjCCAUoCAQAwHTEbMBkGA1UEAwwSbGVhZi5jaWVwcy5leGFtcGxlMIIBIjAN
+          BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3JstB6BqkWjDk246xdzHXl/qg1z3
+          KuyI65Lbymo2d/MDD7K1NxuxLubUpx9vBs/6GHA4twbtmlv6rgppcNJzzhz2B9e7
+          LjR7n+t0+DSIQw1oLNlEAes9iNhGKA0zmJjjY5bYntOyQgW0g5PJNLfDj8NpBg37
+          eqDrQLzMuMH/Krd/w+2FM32e98N+P8smHXA3Z+d9HcEW5wvlxDKxxFjodmVDklX6
+          alW9vnps/4vg33ZakL+gGaZlbZKvjIiBAqCCl1+0fiOluvS6pfbQ2hF4ZLRsxfkM
+          STArNkTiA2vN8UrmwI4erenLxFiSXEEWN/L0KVlLj7ZTd03Ecip+p5qrmwIDAQAB
+          oAAwDQYJKoZIhvcNAQELBQADggEBAA8iLkvMvv4jdnXrlO1WFOoe1XbxNxsrcT/K
+          wVJh3/gGBXKkBFmJrEnmiOPO6XKThG4x9yq1zEsjPnLSjZmTkVPUycj7fTV2LZtW
+          kKb4S2Bv5reHEWOSJBrWCVPF2wssBFEVD7fQEpy93Sdep5KNAYwHbmwq6ymuRsjq
+          xKybXQrVwSjqaUIyF8h8PP0G+m6Zs5pd1ZR2VtA121QwWmcmiIIYCSpmG2pjiXwu
+          vx7eC+EXCLxbl4Ucx86bdX/VVVes0J2xls1uK4ws37SPoAiYiVk4HQHJ75hCM9Cf
+          XAf/SL0nrtjM/QryFGfsI2TWgTpsI1WiEB/ELaam/d53PafTcTE=
+          -----END CERTIFICATE REQUEST-----
+        cert_metadata: c2lnbi1tZXRhZGF0YS1lbnRtZXRh
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [serial_number, certificate]
+            properties:
+              serial_number: {type: string}
+    capture: {serial_sign: data.serial_number}
+  - id: sign-metadata-read
+    depends: [sign-with-metadata]
+    request:
+      method: GET
+      path: /v1/compat-pkica-entmeta/cert-metadata/$serial_sign
+    expect:
+      status: [200]
+      exact:
+        data.cert_metadata: c2lnbi1tZXRhZGF0YS1lbnRtZXRh
+        data.role: compat-entmeta-role
+  - id: batch-certs
+    depends: [issue-with-metadata, sign-with-metadata]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/batch/certs
+      body: {serial_numbers: [$serial, $serial_sign]}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [certificates]
+            properties:
+              certificates:
+                type: object
+                required: [$serial, $serial_sign]
+                properties:
+                  $serial: {type: string, pattern: '-----BEGIN CERTIFICATE-----'}
+                  $serial_sign: {type: string, pattern: '-----BEGIN CERTIFICATE-----'}
+  - id: batch-certs-missing-serial
+    depends: [issue-with-metadata]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/batch/certs
+      body: {serial_numbers: [01:02:03:04:05:06:07:08:09:0a:0b:0c:0d:0e:0f:10:11:12:13:14:15]}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [certificates]
+            properties:
+              certificates:
+                type: object
+                required: ["01:02:03:04:05:06:07:08:09:0a:0b:0c:0d:0e:0f:10:11:12:13:14:15"]
+  - id: batch-certs-empty
+    depends: [issue-with-metadata]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/batch/certs
+      body: {serial_numbers: []}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: role-no-store-metadata
+    depends: [ca-generate]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/roles/compat-entmeta-nostore
+      body: {allowed_domains: [example.com], allow_subdomains: true, max_ttl: 24h, no_store_metadata: true}
+    expect: {status: [200, 204]}
+  - id: issue-nostore-with-metadata-rejected
+    depends: [role-no-store-metadata]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/issue/compat-entmeta-nostore
+      body: {common_name: nostore.example.com, cert_metadata: bm90LXN0b3JlZA==}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: issue-nostore-without-metadata-allowed
+    depends: [issue-nostore-with-metadata-rejected]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/issue/compat-entmeta-nostore
+      body: {common_name: nostore.example.com, ttl: 6h}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [serial_number]
+            properties:
+              serial_number: {type: string}
+  - id: issue-invalid-metadata-rejected
+    depends: [role-create]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entmeta/issue/compat-entmeta-role
+      body: {common_name: badmeta.example.com, cert_metadata: not-base64!!}
+    expect:
+      status: [400]
+      body_schema:
+        type: object
+        required: [errors]
+        properties:
+          errors: {type: array, items: {type: string}}
+  - id: cleanup-unmount
+    depends: [metadata-read, metadata-list, batch-certs, issue-nostore-without-metadata-allowed, issue-invalid-metadata-rejected]
+    actions:
+      - request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entmeta}
+        expect: {status: [204]}
+      - request: {method: GET, path: /v1/sys/mounts/compat-pkica-entmeta}
+        expect: {status: [200, 400, 404]}

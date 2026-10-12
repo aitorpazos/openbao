@@ -211,6 +211,14 @@ func pathImportKey(b *backend) *framework.Path {
 				Type:        framework.TypeString,
 				Description: `PEM-format, unencrypted secret key`,
 			},
+			"wrapped_key": {
+				Type:        framework.TypeString,
+				Description: `Wrapped CA key blob from POST /pki/keys/:key_ref/export on the source mount; mutually exclusive with pem_bundle.`,
+			},
+			"export_key_hmac": {
+				Type:        framework.TypeString,
+				Description: `Fingerprint of the export key used to wrap the CA key; required together with wrapped_key.`,
+			},
 		},
 
 		Operations: map[logical.Operation]framework.OperationHandler{
@@ -267,9 +275,29 @@ func (b *backend) pathImportKeyHandler(ctx context.Context, req *logical.Request
 
 	sc := b.makeStorageContext(ctx, req.Storage)
 	pemBundle := data.Get("pem_bundle").(string)
+	wrappedKey := data.Get("wrapped_key").(string)
+	exportKeyHMAC := data.Get("export_key_hmac").(string)
 	keyName, err := getKeyName(sc, data)
 	if err != nil {
 		return logical.ErrorResponse(err.Error()), nil
+	}
+
+	// Wrapped import path: exactly one of pem_bundle or the wrapped_key +
+	// export_key_hmac pair must be provided.
+	if wrappedKey != "" || exportKeyHMAC != "" {
+		if pemBundle != "" {
+			return logical.ErrorResponse("pem_bundle and wrapped_key are mutually exclusive"), nil
+		}
+		if wrappedKey == "" || exportKeyHMAC == "" {
+			return logical.ErrorResponse("wrapped_key and export_key_hmac must be provided together"), nil
+		}
+		decodedPEM, importErr := b.importWrappedCAKey(ctx, req, wrappedKey, exportKeyHMAC)
+		if importErr != nil {
+			return logical.ErrorResponse("%s", importErr.Error()), nil
+		}
+		// Continue through the normal PEM import flow with the unwrapped
+		// private key.
+		pemBundle = decodedPEM
 	}
 
 	if len(pemBundle) < 64 {

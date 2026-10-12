@@ -29,7 +29,10 @@ type exportKeyRecord struct {
 }
 
 // The private key is barrier-stored and never included in API responses. CA
-// wrapping/unwrapping is not implemented by these management endpoints.
+// key wrapping for cross-mount migration is implemented separately in
+// path_keys_export.go (POST /pki/keys/:key_ref/export) — those wrapped
+// blobs import via POST /pki/keys/import with the wrapped_key +
+// export_key_hmac pair.
 func pathsExportKeys() []*framework.Path {
 	var mu sync.Mutex
 	handler := func(ctx context.Context, r *logical.Request, d *framework.FieldData) (*logical.Response, error) {

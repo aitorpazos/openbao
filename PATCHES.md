@@ -669,3 +669,70 @@ Live ceremony verification (not spec-asserted, per the notes' scope):
 - raft (threshold 3, 5 shares): three shares → progress 1/2/3, complete at
   3 (shamir.Combine exercised); token authorized for merkle-check + reindex;
   revoke → 204; revocation re-check → 403.
+
+## PKI certificate metadata, batch certs, CA-key export/import, issuer check flags (2026-10-12)
+
+Public doc (developer.hashicorp.com/vault/api-docs/secret/pki, v2.x latest):
+issue/sign `cert_metadata` parameter (base64 value; the role's
+`no_store_metadata` must be false), GET/LIST `/pki/cert-metadata` ("Read
+Certificate Metadata" / "List Certificate Metadata"), POST `/pki/batch/certs`
+("Read Batch Certificate"), POST `/pki/keys/:key_ref/export` ("Export CA
+key") with the wrapped-key + `export_key_hmac` import pair on POST
+`/pki/keys/import`, and the issuer fields `disable_critical_extension_checks`,
+`disable_path_length_checks`, `disable_name_checks`,
+`disable_name_constraint_checks` (RFC 5280 chain-of-trust relaxations).
+
+Implementation:
+- `internal/builtin/logical/pki/path_cert_metadata.go` (new): metadata
+  entries under the private `certs-metadata/<hyphen-serial>` prefix (kept
+  out of `certs/` so LIST /pki/cert is not polluted); GET returns
+  `{issuer_id, expiration, cert_metadata, role, serial_number}` (colon-form
+  serial, RFC3339Nano expiration), LIST returns denormalized serials,
+  POST `/pki/batch/certs` returns `{certificates: {<serial>: PEM|null}}`.
+  `cert_metadata` added to `addNonCACommonFields` + `getCELIssueSignFields`
+  so every issue/sign/sign-verbatim/issuer-sign/CEL schema accepts it;
+  stored at issue/sign time when non-empty (400 on invalid base64 or on a
+  role with `no_store_metadata: true`).
+- `internal/builtin/logical/pki/path_keys_export.go` (new): POST
+  `/pki/keys/:key_ref/export` — wraps the CA private key to a
+  caller-supplied public key (rsa-2048/3072/4096 via RSA-OAEP-SHA256; EC
+  P-256/384/521 via ephemeral ECDH-ES + HKDF-SHA256; AES-256-GCM payload).
+  Returns `{ca_key_uuid, wrapped_key, export_key_hmac, exported_at}`.
+  `export_key_hmac` is deterministic on both mounts
+  (`sha256:<hex of the recipient public key DER>`). Requires root/sudo.
+  Managed (external) keys → 400. ml-kem-768/1024 recipients documented
+  upstream are not implemented (400, noted deviation). The wrapped blob
+  imports via POST `/pki/keys/import` (`wrapped_key` + `export_key_hmac`,
+  mutually exclusive with `pem_bundle`): the import path in
+  `path_manage_keys.go` unwraps (matched by the export-key HMAC
+  fingerprint) and re-enters the normal PEM import flow, so the key can be
+  named and stored like any imported key.
+- Issuer check flags: `issuerEntry` gains the four booleans;
+  `buildPathIssuer` fields + `pathUpdateIssuer` writes + `pathGetIssuer`
+  read output; the update handler preserves `issuer_name` when omitted
+  (fixes a fork bug where any PUT without issuer_name cleared the name,
+  breaking by-name reference resolution afterward — flags can only be
+  exercised by-name again after this fix).
+- Deviations: the four check flags are stored/served but the fork performs
+  no RFC 5280 chain validation to relax, so issuance-with-violation
+  enforcement is not observable end-to-end; the wrapping envelope is a
+  clean-room self-consistent format (the doc sample's HMAC value is a
+  placeholder, so no cross-mount wire blob interop with real Enterprise is
+  asserted); tidy does not remove metadata entries of deleted certificates
+  (`tidy_cert_metadata` counter is a documented deviation).
+
+Specs (all PASS on dev and on the raft server):
+- `compat/specs/pki-cert-metadata/00-cert-metadata.yaml` — 19 cases:
+  issue/sign with metadata, read (exact metadata/role + schema), LIST,
+  missing serial 404, batch-certs found/missing/empty, no_store_metadata
+  rejection, issuance without metadata allowed on that role, invalid base64
+  rejection.
+- `compat/specs/pki-issuer-check-flags/00-issuer-check-flags.yaml` — 11
+  cases: default flags false, set-all/persist/clear via by-ID and by-name
+  issuer reads, issuance still works after a flag cycle.
+- `compat/specs/pki-ca-key-migration/00-migration.yaml` — 19 cases: full
+  round-trip (create export key on dest → export default CA key on src →
+  import wrapped on dest with key_name → LIST keys shows the imported key
+  name), plus negative coverage: missing key ref 400, missing/invalid
+  public key 400, unsupported recipient 400, pem+wrapped mutual exclusion,
+  wrapped-without-hmac, wrong hmac, corrupt blob.

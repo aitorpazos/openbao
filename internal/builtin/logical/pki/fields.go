@@ -101,6 +101,15 @@ comma-delimited list.`,
 // addNonCACommonFields adds fields with help text specific to non-CA
 // certificate issuing and signing
 func addNonCACommonFields(fields map[string]*framework.FieldSchema) map[string]*framework.FieldSchema {
+	fields["cert_metadata"] = &framework.FieldSchema{
+		Type:    framework.TypeString,
+		Default: "",
+		Description: `Enterprise: a base 64 encoded value (or an empty
+string) to associate with the certificate's serial number. The role's
+no_store_metadata must be set to false, otherwise an error is returned
+when specified. See the certificate metadata read/list endpoints.`,
+	}
+
 	fields = addIssueAndSignCommonFields(fields)
 
 	fields["role"] = &framework.FieldSchema{
@@ -658,6 +667,15 @@ SHA-2-512. Defaults to 0 to automatically detect based on key length
 		Default: false,
 		Description: `Whether or not to use PSS signatures when using a
 RSA key-type issuer. Defaults to false.`,
+	}
+
+	fields["cert_metadata"] = &framework.FieldSchema{
+		Type:    framework.TypeString,
+		Default: "",
+		Description: `Enterprise: a base 64 encoded value (or an empty
+string) to associate with the certificate's serial number. The role's
+no_store_metadata must be set to false, otherwise an error is returned
+when specified. See the certificate metadata read/list endpoints.`,
 	}
 
 	return fields

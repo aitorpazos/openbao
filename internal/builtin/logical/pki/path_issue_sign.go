@@ -778,6 +778,27 @@ func (b *backend) pathIssueSignCert(ctx context.Context, req *logical.Request, d
 			return nil, fmt.Errorf("unable to store certificate locally: %w", err)
 		}
 		b.ifCountEnabledIncrementTotalCertificatesCount(certsCounted, key)
+
+		// Enterprise certificate metadata: associate a base64 value with
+		// the certificate's serial number (documented issue/sign
+		// parameter). The role must permit metadata storage.
+		if certMetadata := data.Get("cert_metadata").(string); certMetadata != "" {
+			if role.NoStoreMetadata {
+				return logical.ErrorResponse("certificate metadata requested but role has no_store_metadata set"), nil
+			}
+			if _, decodeErr := base64.StdEncoding.DecodeString(certMetadata); decodeErr != nil {
+				return logical.ErrorResponse("cert_metadata must be base64 encoded"), nil
+			}
+			resolveRef := issuerName
+			if resolveRef == "" {
+				resolveRef = defaultRef
+			}
+			if resolvedIssuer, issuerErr := sc.resolveIssuerReference(resolveRef); issuerErr == nil {
+				if storeErr := sc.storeCertMetadata(string(resolvedIssuer), parsedBundle.Certificate, role.Name, certMetadata); storeErr != nil {
+					return nil, fmt.Errorf("unable to store certificate metadata: %w", storeErr)
+				}
+			}
+		}
 	}
 
 	if useCSR {

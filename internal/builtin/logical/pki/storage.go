@@ -179,6 +179,15 @@ type issuerEntry struct {
 	AIAURIs              *aiaConfigEntry           `json:"aia_uris,omitempty"`
 	LastModified         time.Time                 `json:"last_modified"`
 	Version              uint                      `json:"version"`
+
+	// Enterprise chain-validation relaxations (documented issuer fields).
+	// Each permits issuance despite the matching RFC 5280 chain-of-trust
+	// violation class; this build stores and serves the flags but does not
+	// perform the underlying chain validation (documented deviation).
+	DisableCriticalExtensionChecks bool `json:"disable_critical_extension_checks"`
+	DisablePathLengthChecks        bool `json:"disable_path_length_checks"`
+	DisableNameChecks              bool `json:"disable_name_checks"`
+	DisableNameConstraintChecks    bool `json:"disable_name_constraint_checks"`
 }
 
 type internalCRLConfigEntry struct {

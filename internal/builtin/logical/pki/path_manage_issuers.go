@@ -655,8 +655,28 @@ func pathRevokeIssuer(b *backend) *framework.Path {
 								Description: `RFC formatted time of revocation`,
 								Required:    false,
 							},
+							"disable_critical_extension_checks": {
+								Type:        framework.TypeBool,
+								Description: `Enterprise: disable RFC 5280 critical-extension chain checks`,
+								Required:    false,
+							},
+							"disable_path_length_checks": {
+								Type:        framework.TypeBool,
+								Description: `Enterprise: disable RFC 5280 path-length chain checks`,
+								Required:    false,
+							},
+							"disable_name_checks": {
+								Type:        framework.TypeBool,
+								Description: `Enterprise: disable RFC 5280 name chain checks`,
+								Required:    false,
+							},
+							"disable_name_constraint_checks": {
+								Type:        framework.TypeBool,
+								Description: `Enterprise: disable RFC 5280 name-constraint chain checks`,
+								Required:    false,
+							},
 						},
-					}},
+				}},
 				},
 				// Read more about why these flags are set in backend.go
 				ForwardPerformanceStandby:   true,

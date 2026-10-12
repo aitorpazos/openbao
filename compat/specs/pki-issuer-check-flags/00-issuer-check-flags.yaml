@@ -1,0 +1,141 @@
+# SPDX-License-Identifier: MPL-2.0
+api: pki-enterprise-issuer-chain-validation-relaxations
+feature: pki-issuer-check-flags
+source: https://developer.hashicorp.com/vault/api-docs/secret/pki
+source_version: "v2.x (latest)"
+notes: |
+  Enterprise issuer fields disable_critical_extension_checks,
+  disable_path_length_checks, disable_name_checks, and
+  disable_name_constraint_checks ("disable X checks" issuer entries on the
+  pki API page, v2.x latest). Each permits issuing certificates where the
+  chain of trust contains the matching RFC 5280 violation class. Settable
+  via PUT /pki/issuer/:ref, readable via GET /pki/issuer/:ref.
+  Deviation: this build stores and serves the flags but does not perform
+  the underlying RFC 5280 chain-of-trust validation they relax, so
+  issuance-with-violation enforcement cannot be observed end-to-end.
+cases:
+  - id: mount-preclean
+    request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entflags}
+    expect: {status: [200, 204, 400, 404]}
+    sleep_ms: 3000
+  - id: mount-enable
+    depends: [mount-preclean]
+    request: {method: POST, path: /v1/sys/mounts/compat-pkica-entflags, body: {type: pki}}
+    expect: {status: [200, 204]}
+  - id: ca-generate
+    depends: [mount-enable]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entflags/issuers/generate/root/internal
+      body: {common_name: compat-pkica-entflags.example, ttl: 24h, issuer_name: entflags-root}
+    expect:
+      status: [200]
+    capture: {issuer_id: data.issuer_id}
+  - id: issuer-defaults-absent
+    depends: [ca-generate]
+    request:
+      method: GET
+      path: /v1/compat-pkica-entflags/issuer/$issuer_id
+    expect:
+      status: [200]
+      exact:
+        data.disable_critical_extension_checks: false
+        data.disable_path_length_checks: false
+        data.disable_name_checks: false
+        data.disable_name_constraint_checks: false
+  - id: issuer-set-all-flags
+    depends: [ca-generate]
+    request:
+      method: PUT
+      path: /v1/compat-pkica-entflags/issuer/$issuer_id
+      body:
+        disable_critical_extension_checks: true
+        disable_path_length_checks: true
+        disable_name_checks: true
+        disable_name_constraint_checks: true
+    expect:
+      status: [200]
+      exact:
+        data.disable_critical_extension_checks: true
+        data.disable_path_length_checks: true
+        data.disable_name_checks: true
+        data.disable_name_constraint_checks: true
+  - id: issuer-flags-persist
+    depends: [issuer-set-all-flags]
+    request:
+      method: GET
+      path: /v1/compat-pkica-entflags/issuer/$issuer_id
+    expect:
+      status: [200]
+      exact:
+        data.disable_critical_extension_checks: true
+        data.disable_path_length_checks: true
+        data.disable_name_checks: true
+        data.disable_name_constraint_checks: true
+  - id: issuer-clear-flags
+    depends: [issuer-flags-persist]
+    request:
+      method: PUT
+      path: /v1/compat-pkica-entflags/issuer/$issuer_id
+      body:
+        disable_critical_extension_checks: false
+        disable_path_length_checks: false
+        disable_name_checks: false
+        disable_name_constraint_checks: false
+    expect:
+      status: [200]
+      exact:
+        data.disable_critical_extension_checks: false
+        data.disable_path_length_checks: false
+        data.disable_name_checks: false
+        data.disable_name_constraint_checks: false
+  - id: issuance-still-works-after-flag-cycle
+    depends: [issuer-clear-flags]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entflags/roles/compat-entflags-role
+      body: {allowed_domains: [example.com], allow_subdomains: true, max_ttl: 24h}
+    expect: {status: [200, 204]}
+  - id: issue-after-flag-cycle
+    depends: [issuance-still-works-after-flag-cycle]
+    request:
+      method: POST
+      path: /v1/compat-pkica-entflags/issue/compat-entflags-role
+      body: {common_name: flags.example.com, ttl: 6h}
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [serial_number, certificate]
+            properties:
+              serial_number: {type: string}
+  - id: issuer-by-name-read
+    depends: [ca-generate]
+    request:
+      method: GET
+      path: /v1/compat-pkica-entflags/issuer/entflags-root
+    expect:
+      status: [200]
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [disable_critical_extension_checks, disable_path_length_checks, disable_name_checks, disable_name_constraint_checks]
+            properties:
+              disable_critical_extension_checks: {type: boolean}
+              disable_path_length_checks: {type: boolean}
+              disable_name_checks: {type: boolean}
+              disable_name_constraint_checks: {type: boolean}
+  - id: cleanup-unmount
+    depends: [issue-after-flag-cycle, issuer-by-name-read]
+    actions:
+      - request: {method: DELETE, path: /v1/sys/mounts/compat-pkica-entflags}
+        expect: {status: [204]}
+      - request: {method: GET, path: /v1/sys/mounts/compat-pkica-entflags}
+        expect: {status: [200, 400, 404]}

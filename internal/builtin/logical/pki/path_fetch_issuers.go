@@ -229,6 +229,45 @@ to be set on all PR secondary clusters.`,
 		Default: false,
 	}
 
+	// Enterprise chain-validation relaxations. Each flag permits issuing
+	// certificates where the chain of trust contains the matching RFC 5280
+	// violation class; this build stores and serves them but does not
+	// perform the underlying chain validation (documented deviation).
+	fields["disable_critical_extension_checks"] = &framework.FieldSchema{
+		Type:    framework.TypeBool,
+		Default: false,
+		Description: `Enterprise: whether this issuer is able to issue
+certificates where the chain of trust (including the issued certificate)
+contains critical extensions not processed by Vault, breaking the behavior
+required by RFC 5280 Section 6.1.`,
+	}
+	fields["disable_path_length_checks"] = &framework.FieldSchema{
+		Type:    framework.TypeBool,
+		Default: false,
+		Description: `Enterprise: whether this issuer is able to issue
+certificates where the chain of trust (including the final issued
+certificate) is longer than allowed by a certificate authority in that
+chain, breaking the behavior required by RFC 5280 Section 4.2.1.9.`,
+	}
+	fields["disable_name_checks"] = &framework.FieldSchema{
+		Type:    framework.TypeBool,
+		Default: false,
+		Description: `Enterprise: whether this issuer is able to issue
+certificates where the chain of trust (including the final issued
+certificate) contains a link in which the subject of the issuing
+certificate does not match the named issuer of the certificate it signed,
+breaking the behavior required by RFC 5280 Section 4.1.2.4.`,
+	}
+	fields["disable_name_constraint_checks"] = &framework.FieldSchema{
+		Type:    framework.TypeBool,
+		Default: false,
+		Description: `Enterprise: whether this issuer is able to issue
+certificates where the chain of trust (including the final issued
+certificate) violates the name constraints critical extension of one of
+the issuer certificates in the chain, breaking the behavior required by
+RFC 5280 Section 4.2.1.10.`,
+	}
+
 	updateIssuerSchema := map[int][]framework.Response{
 		http.StatusOK: {{
 			Description: "OK",
@@ -241,6 +280,26 @@ to be set on all PR secondary clusters.`,
 				"issuer_name": {
 					Type:        framework.TypeString,
 					Description: `Issuer Name`,
+					Required:    false,
+				},
+				"disable_critical_extension_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 critical-extension chain checks`,
+					Required:    false,
+				},
+				"disable_path_length_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 path-length chain checks`,
+					Required:    false,
+				},
+				"disable_name_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 name chain checks`,
+					Required:    false,
+				},
+				"disable_name_constraint_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 name-constraint chain checks`,
 					Required:    false,
 				},
 				"key_id": {
@@ -398,6 +457,26 @@ func buildPathGetIssuer(b *backend, pattern string, displayAttrs *framework.Disp
 					Description: `CA Chain`,
 					Required:    true,
 				},
+				"disable_critical_extension_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 critical-extension chain checks`,
+					Required:    false,
+				},
+				"disable_path_length_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 path-length chain checks`,
+					Required:    false,
+				},
+				"disable_name_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 name chain checks`,
+					Required:    false,
+				},
+				"disable_name_constraint_checks": {
+					Type:        framework.TypeBool,
+					Description: `Enterprise: disable RFC 5280 name-constraint chain checks`,
+					Required:    false,
+				},
 			},
 		}},
 	}
@@ -496,6 +575,11 @@ func respondReadIssuer(issuer *issuerEntry) (*logical.Response, error) {
 		data["enable_aia_url_templating"] = issuer.AIAURIs.EnableTemplating
 	}
 
+	data["disable_critical_extension_checks"] = issuer.DisableCriticalExtensionChecks
+	data["disable_path_length_checks"] = issuer.DisablePathLengthChecks
+	data["disable_name_checks"] = issuer.DisableNameChecks
+	data["disable_name_constraint_checks"] = issuer.DisableNameConstraintChecks
+
 	response := &logical.Response{
 		Data: data,
 	}
@@ -543,6 +627,12 @@ func (b *backend) pathUpdateIssuer(ctx context.Context, req *logical.Request, da
 		// issuer name (or causing a conflict) -- so don't err out. Other
 		// errs should still be surfaced, however.
 		return logical.ErrorResponse(err.Error()), nil
+	}
+	if len(newName) == 0 {
+		// issuer_name omitted on update: preserve the existing name.
+		// Clearing it would break by-name reference resolution for an
+		// otherwise-valid PUT (e.g. toggling other issuer fields).
+		newName = issuer.Name
 	}
 	if err == errIssuerNameInUse && issuer.Name != newName {
 		// When the new name is in use but isn't this name, throw an error.
@@ -608,6 +698,12 @@ func (b *backend) pathUpdateIssuer(ctx context.Context, req *logical.Request, da
 		return logical.ErrorResponse("invalid URL found in Authority Information Access (AIA) parameter ocsp_servers: %s", badURL), nil
 	}
 
+	// Enterprise chain-validation relaxation flags.
+	newCriticalExtensionChecks := data.Get("disable_critical_extension_checks").(bool)
+	newPathLengthChecks := data.Get("disable_path_length_checks").(bool)
+	newNameChecks := data.Get("disable_name_checks").(bool)
+	newNameConstraintChecks := data.Get("disable_name_constraint_checks").(bool)
+
 	modified := false
 
 	var oldName string
@@ -623,6 +719,24 @@ func (b *backend) pathUpdateIssuer(ctx context.Context, req *logical.Request, da
 
 	if newLeafBehavior != issuer.LeafNotAfterBehavior {
 		issuer.LeafNotAfterBehavior = newLeafBehavior
+		modified = true
+	}
+
+	// Enterprise chain-validation relaxation flags.
+	if newCriticalExtensionChecks != issuer.DisableCriticalExtensionChecks {
+		issuer.DisableCriticalExtensionChecks = newCriticalExtensionChecks
+		modified = true
+	}
+	if newPathLengthChecks != issuer.DisablePathLengthChecks {
+		issuer.DisablePathLengthChecks = newPathLengthChecks
+		modified = true
+	}
+	if newNameChecks != issuer.DisableNameChecks {
+		issuer.DisableNameChecks = newNameChecks
+		modified = true
+	}
+	if newNameConstraintChecks != issuer.DisableNameConstraintChecks {
+		issuer.DisableNameConstraintChecks = newNameConstraintChecks
 		modified = true
 	}
 

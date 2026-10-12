@@ -240,6 +240,8 @@ func Backend(conf *logical.BackendConfig) *backend {
 
 	b.Paths = append(b.Paths, acmePaths...)
 	b.Paths = append(b.Paths, pathsExportKeys()...)
+	b.Paths = append(b.Paths, pathExportCAKey(&b))
+	b.Paths = append(b.Paths, pathsCertMetadata(&b)...)
 
 	// Add specific un-auth'd paths for ACME APIs
 	for _, acmePrefix := range []string{"", "issuer/+/", "roles/+/", "issuer/+/roles/+/"} {
