@@ -26,17 +26,19 @@ Also added: specs for the DR operation-token ceremony route/schema surface
 FEATURE_ABSENT pending those routes).
 
 Live full-suite state on a fresh in-memory dev server (compat-harness, latest
-branch tip): **1042 PASS / 38 FEATURE_ABSENT / 24 FAIL / 27 SKIP**. The FAILs
+branch tip): **1043 PASS / 37 FEATURE_ABSENT / 24 FAIL / 27 SKIP**. The FAILs
 decompose as: 16 SCIM fixture-contract cases (clear when run with the
 documented SCIM-actor token — verified 20/20; the suite's shared token cannot
-be the registered actor), 3 audit cases requiring the
-`unsafe-allow-api-audit-creation` dev flag, 3 recovery-key-rekey fixture
+be the registered actor), 3 audit cases requiring a dev server started with
+`unsafe_allow_api_audit_creation = true` (verified 27/27), 3 recovery-key-rekey
+fixture
 gates (deliberate: the fixture-only suites FAIL their gate on non-fixture
 targets so the rest SKIP), 1 documented asynchronous namespace-deletion
 fixture race (direct retry succeeds), and SLH-DSA create — a documented
 clean-room deferral, not a spec error. FEATURE_ABSENT on the inmem dev
-target decomposes as: 28 raft-only routes (storage precondition, see below),
-the 9 DR operation-token routes, and 1 mfa-stepup-requirements route.
+target decomposes as: 28 raft-only routes (storage precondition, see below)
+and the 9 DR operation-token routes; the former mfa-stepup-requirements FA
+was fixed by writing to the mount the spec creates.
 Two more state notes: `sys-activation-flags-secrets-import` read-pre-activation
 requires a fresh server (the activation flag is one-time), and the
 namespace-deletion UI race self-heals on retry.
