@@ -105,9 +105,15 @@ type Expect struct {
 	// Absent asserts that each dotted key is NOT present in the response
 	// (isolation checks: a namespaced object must not appear in a
 	// root-scoped response). A missing ancestor chain satisfies the check.
-	Absent []string  `yaml:"absent"`
-	Errors []string  `yaml:"errors_contain"`
-	Body   yaml.Node `yaml:"body"`
+	Absent []string `yaml:"absent"`
+	Errors []string `yaml:"errors_contain"`
+	// BodyText asserts that the raw response body CONTAINS the given
+	// text. It exists for non-JSON surfaces (text/plain exposition
+	// formats, plain-text error bodies) that cannot survive the harness
+	// JSON parse path; when set, JSON assertions are skipped for that
+	// case and the status must still match Expect.Status.
+	BodyText string    `yaml:"body_text"`
+	Body     yaml.Node `yaml:"body"`
 }
 type Statuses []int
 

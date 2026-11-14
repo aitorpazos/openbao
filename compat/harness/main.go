@@ -168,7 +168,7 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 		return "ERROR", status, err.Error(), captured
 	}
 	var body any
-	if len(bytes.TrimSpace(b)) != 0 {
+	if len(bytes.TrimSpace(b)) != 0 && c.Expect.BodyText == "" {
 		if err = json.Unmarshal(b, &body); err != nil {
 			return "ERROR", status, "bad JSON: " + err.Error(), captured
 		}
@@ -181,6 +181,12 @@ func runCase(client *http.Client, target, token string, capturedData map[string]
 	}
 	if !accepted {
 		return "FAIL", status, fmt.Sprintf("HTTP %d; expected %v", status, c.Expect.Status), captured
+	}
+	if c.Expect.BodyText != "" {
+		if !strings.Contains(string(b), c.Expect.BodyText) {
+			return "FAIL", status, fmt.Sprintf("body_text %q not in response", c.Expect.BodyText), captured
+		}
+		return "PASS", status, "HTTP " + fmt.Sprint(status) + "; body_text matched", captured
 	}
 	if c.Expect.Body.Kind != 0 && len(b) != 0 {
 		return "FAIL", status, "expected empty body", captured
