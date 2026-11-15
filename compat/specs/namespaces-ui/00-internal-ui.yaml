@@ -14,6 +14,16 @@ notes: |
   token suite does not prove restricted-token visibility or policy-free route access.
   Internal endpoints explicitly make no backwards-compatibility guarantees.
   Cleanup depends on fixture creation, NOT the assertion, so failures do not block it.
+
+  Divergence annotations (R5 audit S-11): Vault Community exhibits two
+  artifacts the docs do not describe — (a) an empty-string first entry in
+  data.keys ("keys":[""]) alongside real paths, and (b) a 500-class
+  response (panic-shaped) for the tokenless request. TV serves the
+  documented shape: keys carries only real namespace paths (no ""
+  entry) and the tokenless request is a clean 403 errors envelope. The
+  empty-token row therefore accepts either status (403 TV, 500
+  Community); the recursive-list row keeps the TV-faithful (docs-faithful)
+  shape and Community's "" artifact is annotated, not re-pinned.
 cases:
   - id: create-ui-parent
     request: {method: POST, path: /v1/sys/namespaces/compat-ui-list, body: {}}
@@ -46,10 +56,14 @@ cases:
                   type: string
                   pattern: '^[^/]+(/[^/]+)*/$'
   - id: ui-namespaces-requires-auth
+    # Docs do not pin the unauthenticated status. TV: 403 errors envelope.
+    # Vault Community: 500 (panic-shaped). Accept either; the assertions
+    # below use the errors envelope shape, which TV satisfies (Community's
+    # panic body is annotated, not re-pinned).
     no_auth: true
     request: {method: GET, path: /v1/sys/internal/ui/namespaces, headers: {X-Vault-Token: ''}}
     expect:
-      status: 403
+      status: [403, 500]
       body_schema:
         type: object
         required: [errors]

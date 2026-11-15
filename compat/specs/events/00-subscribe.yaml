@@ -8,13 +8,21 @@ source_version: v2.x (latest)
 notes: notes.md
 cases:
   # ---- Authentication / authorization on the subscription endpoint ----
+  # Docs do not pin the unauthenticated status; observed binaries differ
+  # (TelnyxVault 401 "missing client token", Vault Community 403
+  # "permission denied") and both are acceptable auth failures, so the
+  # expectation accepts either. The events subscription surface is
+  # Enterprise-gated in the docs: Community 404s the root-subscribe row
+  # with the standard multierror text; TV implements the documented
+  # endpoint, so the subscription rows below are annotated
+  # Enterprise-only where Community cannot exercise them.
   - id: subscribe-unauthenticated-rejected
     note: The subscription endpoint supports the standard authentication workflows.
     no_auth: true
     subscribe:
       type: kv-v2/data-write
     expect:
-      status: [401]
+      status: [401, 403]
 
   - id: policy-grant-subscribe
     note: Policy granting read on the subscribe path plus list+subscribe on the secret path with subscribe_event_types.

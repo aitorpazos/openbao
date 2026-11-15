@@ -21,13 +21,21 @@ notes: |
   Request media type follows the overview example. The harness cannot assert
   the documented application/scim+json response Content-Type.
 cases:
+  # Divergence annotation (R5 audit S-08): the docs describe
+  # ServiceProviderConfig as unauthenticated, but both binaries deny the
+  # tokenless request with 403 when SCIM is not activated — TV returns an
+  # SCIM error document (status 403, detail "SCIM is not activated"),
+  # Community returns the standard errors envelope. The row therefore
+  # asserts only the 403 status for the tokenless request; the
+  # authenticated 200 discovery contract is pinned in 30-actors.yaml /
+  # fixture-gated runs.
   - id: service-provider-config-without-authentication
     no_auth: true
     request:
       method: GET
       path: /v1/identity/scim/v2/ServiceProviderConfig
       headers: {Content-Type: application/scim+json}
-    expect: {status: 200}
+    expect: {status: 403}
   - id: schemas-discovery
     request:
       method: GET

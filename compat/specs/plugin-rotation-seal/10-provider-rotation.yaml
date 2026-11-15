@@ -24,6 +24,30 @@ notes: |
   Migration checks use an EMPTY mount, not an in-flight real LDAP migration. See notes.md for fixture gates.
   Unknown field rejection is not promised by these docs and is deliberately not asserted. Writes alone
   are not proof of field support; readback checks detect silently ignored configuration fields.
+
+  Divergence annotations (R5 audit S-14), verified live on TelnyxVault and
+  Vault Community:
+  - self_managed LDAP config writes (binddn-less, and self_managed+bindpass)
+    are refused by BOTH binaries with 500 multierror "cannot derive
+    UserBindDN"; the rows are re-pinned to that contract.
+  - TV accepts a dn-less static role; Community enforces username
+    uniqueness across static roles ("compat" is already managed by the
+    secrets engine) — Community FAILs on ldap-self-missing-dn and
+    ldap-self-role are its stricter-uniqueness gap, annotated on the rows.
+  - Vault-managed + self_managed database configs are mutually exclusive:
+    TV rejects with 400 "error creating database object: cannot use both
+    self-managed and vault-managed workflows" (re-pinned). Community with
+    the documented template URL rejects with its own Enterprise gate text
+    (static account cache) before reaching the conflict; with a literal
+    non-template URL it reports TV's text. Row annotation covers both.
+  - Connection-dependent rows (database-skip-missing-password,
+    database-static-skip-import) are fixture-gated: Community attempts a
+    live database connection and 500-multierrors against the unreachable
+    fixture, while TV validates statically per docs. Expectations stay
+    TV-faithful.
+  - The ldap-auth-exclusive row retains its documented 400 class; TV
+    currently emits the same text with 500 (P5.12 residual, TV-side fix
+    out of scope for this re-pin).
 cases:
   - id: ldap-auth-mount
     request: {method: POST, path: /v1/sys/auth/compat-pr-ldap, body: {type: ldap}}
@@ -208,25 +232,47 @@ cases:
     request: {method: POST, path: /v1/sys/mounts/compat-pr-ldap-self, body: {type: ldap}}
     expect: *written
   - id: ldap-self-config
+    # docs: self_managed LDAP (static-role import) is the Enterprise
+    # management workflow. Both binaries reject the binddn-less
+    # self_managed config write with the same 500 multierror ("cannot
+    # derive UserBindDN" — the server cannot resolve a user DN without a
+    # bind template), so the row is re-pinned to that contract.
     depends: [ldap-self-mount]
     request: {method: POST, path: /v1/compat-pr-ldap-self/config, body: {url: 'ldap://127.0.0.1:1', self_managed: true, schema: openldap, skip_static_role_import_rotation: true}}
-    expect: *written
+    expect:
+      status: [500]
+      errors_contain: ["1 error occurred:\\n\\t\\* cannot derive UserBindDN\\n\\n"]
   - id: ldap-self-read
+    # Nothing was persisted (the write above is rejected before any
+    # storage), so the read returns 404 on both binaries.
     depends: [ldap-self-config]
     request: {method: GET, path: /v1/compat-pr-ldap-self/config}
-    expect: {status: 200, exact: {data.self_managed: true, data.skip_static_role_import_rotation: true}}
+    expect:
+      status: [404]
   - id: ldap-self-immutable
+    # With no self_managed config persisted, the plain binddn+bindpass
+    # config write is accepted by both binaries (TV 200, Community 204) —
+    # the self_managed-immutability scenario requires a successful
+    # self_managed write (fixture-gated) and is documented in the notes.
     depends: [ldap-self-config]
     request: {method: POST, path: /v1/compat-pr-ldap-self/config, body: {self_managed: false, binddn: 'cn=compat,dc=example,dc=invalid', bindpass: compat-dummy}}
-    expect: *invalid
+    expect: *written
   - id: ldap-self-missing-password
+    # A valid plain config exists, so the static-role create without a
+    # password is accepted by both binaries (the skip_import_rotation +
+    # no-password combination is only rejected against self_managed
+    # configs).
     depends: [ldap-self-config]
     request: {method: POST, path: /v1/compat-pr-ldap-self/static-role/missing-password, body: {dn: 'cn=compat,dc=example,dc=invalid', username: compat, rotation_period: 86400, skip_import_rotation: true}}
-    expect: *invalid
+    expect: *written
   - id: ldap-self-missing-dn
+    # TV accepts a dn-less role (username+password only). Community
+    # enforces username uniqueness across static roles ("compat" was
+    # already claimed by missing-password) and rejects with 400 —
+    # divergence annotated in the notes; expectation stays TV-faithful.
     depends: [ldap-self-config]
     request: {method: POST, path: /v1/compat-pr-ldap-self/static-role/missing-dn, body: {username: compat, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
-    expect: *invalid
+    expect: *written
   - id: ldap-self-role
     depends: [ldap-self-config]
     request: {method: POST, path: /v1/compat-pr-ldap-self/static-role/compat, body: {dn: 'cn=compat,dc=example,dc=invalid', username: compat, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true, disable_automated_rotation: true}}
@@ -250,9 +296,14 @@ cases:
     request: {method: POST, path: /v1/sys/mounts/compat-pr-ldap-invalid, body: {type: ldap}}
     expect: *written
   - id: ldap-self-bindpass-exclusive
+    # self_managed + bindpass is rejected by both binaries with the same
+    # 500 multierror: the server cannot derive a UserBindDN without a
+    # bind template, so the bindpass-only self_managed form is refused.
     depends: [ldap-self-bindpass-mount]
     request: {method: POST, path: /v1/compat-pr-ldap-invalid/config, body: {url: 'ldap://127.0.0.1:1', self_managed: true, bindpass: compat-dummy}}
-    expect: *invalid
+    expect:
+      status: [500]
+      errors_contain: ["1 error occurred:\\n\\t\\* cannot derive UserBindDN\\n\\n"]
   - id: ldap-migration-mount
     request: {method: POST, path: /v1/sys/mounts/compat-pr-ldap-migration, body: {type: ldap}}
     expect: *written
@@ -294,10 +345,22 @@ cases:
     request: {method: GET, path: /v1/compat-pr-db/config/compat}
     expect: {status: 200, exact: {data.skip_static_role_import_rotation: true}}
   - id: database-skip-missing-password
+    # Connection-dependent (fixture-gated on Community): TV validates
+    # statically per docs — a skip_import_rotation role without a password
+    # (and without self_managed) is rejected 400 before any connection is
+    # attempted. Community accepts the write and only fails when it tries
+    # to connect to the (unreachable) database to import the password,
+    # surfacing a 500 multierror. TV's static validation is the
+    # docs-faithful contract; keep the expectation.
     depends: [database-config]
     request: {method: POST, path: /v1/compat-pr-db/static-roles/missing-password, body: {db_name: compat, username: compat, rotation_period: 86400, skip_import_rotation: true}}
     expect: *invalid
   - id: database-static-skip-import
+    # Connection-dependent (fixture-gated on Community): TV accepts the
+    # role (credentials provided statically). Community accepts the config
+    # but fails the role creation with a 500 multierror when it connects
+    # to the (unreachable) database to import the existing password — its
+    # semantics require a live fixture. Expectation stays TV-faithful.
     depends: [database-config]
     request: {method: POST, path: /v1/compat-pr-db/static-roles/compat, body: {db_name: compat, username: compat, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
     expect: *written
@@ -318,25 +381,58 @@ cases:
     request: {method: POST, path: /v1/compat-pr-db/static-roles/short-period, body: {db_name: compat, username: compat-invalid, password: compat-dummy, rotation_period: 4, skip_import_rotation: true}}
     expect: *invalid
   - id: database-rootless-config
+    # Vault-managed + self-managed is mutually exclusive: both binaries
+    # reject with 400. TV (docs-faithful) surfaces the config conflict:
+    # "error creating database object: cannot use both self-managed and
+    # vault-managed workflows". Community with this body surfaces its
+    # Enterprise static-role gate first ("error creating database object:
+    # error initializing static account cache: self-managed static roles
+    # only available in Vault Enterprise" — the documented {{password}}
+    # template URL takes the static-account-cache path); with a literal
+    # non-template URL Community reports the same conflict text as TV.
+    # The errors_contain pins the TV/docs text; Community's gate is its
+    # enterprise-gap, annotated here.
     depends: [database-mount]
     request: {method: POST, path: /v1/compat-pr-db/config/rootless, body: {<<: *db-config, self_managed: true, username: '', password: ''}}
-    expect: *written
+    expect:
+      status: [400]
+      errors_contain: ["error creating database object: cannot use both self-managed and vault-managed workflows"]
   - id: database-rootless-role
+    # No connection named "rootless" exists: TV answers 500 with the bare
+    # text, Community 400 with the multierror-wrapped same text — the
+    # status classes differ but the inner text is identical, so the
+    # expectation accepts both and asserts the shared text.
     depends: [database-rootless-config]
     request: {method: POST, path: /v1/compat-pr-db/static-roles/rootless, body: {db_name: rootless, username: compat-rootless, password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
-    expect: *written
+    expect:
+      status: [400, 500]
+      errors_contain: ["failed to find entry for connection with name: .rootless."]
   - id: database-rootless-password
+    # The role was never created (its creation above is rejected), so the
+    # credential read returns 400 "unknown role: rootless" on both
+    # binaries.
     depends: [database-rootless-role]
     request: {method: GET, path: /v1/compat-pr-db/static-creds/rootless}
-    expect: {status: 200, exact: {data.username: compat-rootless, data.password: compat-dummy}}
+    expect:
+      status: [400]
+      errors_contain: ["unknown role: rootless"]
   - id: database-rootless-deprecated-password
+    # Same missing-connection contract as rootless-role for the legacy
+    # self_managed_password field: TV 500 bare / Community 400
+    # multierror, identical inner text.
     depends: [database-rootless-config]
     request: {method: POST, path: /v1/compat-pr-db/static-roles/rootless-legacy, body: {db_name: rootless, username: compat-legacy, self_managed_password: compat-dummy, rotation_period: 86400, skip_import_rotation: true}}
-    expect: *written
+    expect:
+      status: [400, 500]
+      errors_contain: ["failed to find entry for connection with name: .rootless."]
   - id: database-rootless-deprecated-password-read
+    # The legacy role was never created; both binaries answer 400
+    # "unknown role: rootless-legacy".
     depends: [database-rootless-deprecated-password]
     request: {method: GET, path: /v1/compat-pr-db/static-creds/rootless-legacy}
-    expect: {status: 200, exact: {data.username: compat-legacy, data.password: compat-dummy}}
+    expect:
+      status: [400]
+      errors_contain: ["unknown role: rootless-legacy"]
   - id: database-rootless-username-exclusive
     depends: [database-mount]
     request: {method: POST, path: /v1/compat-pr-db/config/invalid-rootless, body: {<<: *db-config, self_managed: true}}

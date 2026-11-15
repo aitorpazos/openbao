@@ -20,6 +20,18 @@ notes: |
   Export success returns JSON lines or CSV, unsupported by the harness's unconditional
   single-JSON response decoder; only documented-input validation is executable here.
   No /activity/query endpoint is documented. See notes.md for source inconsistencies.
+
+  docs-Enterprise / binary non-enforcement annotations (R5 audit S-12):
+  Vault Community 404s the whole counters surface without a license
+  (FEATURE_ABSENT on the read rows). Where Community does serve the
+  surface, it does NOT enforce the documented bounds: (a) retention
+  bounds — Community accepts retention_months outside the documented
+  48-60 range (204/200) while TV validates per docs (400); the
+  below/above-maximum rows are annotated accordingly and keep TV-faithful
+  expectations. (b) monthly counters (activity-monthly-read) and (c)
+  activity export — Community answers 204 with an empty body when
+  counting is disabled instead of the documented monthly/export shapes;
+  those rows are annotated and keep the TV-faithful 200 expectations.
 cases:
   - id: counters-entities-read
     request: {method: GET, path: /v1/sys/internal/counters/entities}
@@ -146,6 +158,10 @@ cases:
       method: GET
       path: /v1/sys/internal/counters/activity/cumulative?start_time=2025-06-01T00%3A00%3A00Z&end_time=2025-06-30T00%3A00%3A00Z
     expect: *cumulative-response
+  # docs-Enterprise: Vault Community without a license answers 204 (empty
+  # body) when counting is disabled instead of the documented monthly
+  # shape; TV implements the documented surface. Expectation stays
+  # TV-faithful.
   - id: activity-monthly-read
     request: {method: GET, path: /v1/sys/internal/counters/activity/monthly}
     expect:
@@ -194,18 +210,25 @@ cases:
       path: /v1/sys/internal/counters/config
       body: {enabled: compat-lic-invalid}
     expect: *invalid
+  # Binary non-enforcement annotation (R5 audit S-12): Vault Community
+  # accepts retention_months outside the documented 48-60 bounds (204/200
+  # silent); TV validates per docs. Expectation stays TV-faithful.
   - id: counters-config-retention-below-minimum
     request:
       method: POST
       path: /v1/sys/internal/counters/config
       body: {retention_months: 47}
     expect: *invalid
+  # Same annotation as below-minimum.
   - id: counters-config-retention-above-maximum
     request:
       method: POST
       path: /v1/sys/internal/counters/config
       body: {retention_months: 61}
     expect: *invalid
+  # docs-Enterprise: Vault Community without a license answers 204 (empty
+  # body, no input validation) instead of the documented export error
+  # contract; TV validates per docs. Expectation stays TV-faithful.
   - id: activity-export-invalid-format
     request:
       method: GET

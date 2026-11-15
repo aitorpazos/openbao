@@ -28,6 +28,10 @@ cases:
         data.known_secondaries: []
         data.last_dr_wal: 0
   - id: combined-status-shows-dr
+    # docs-Enterprise: the dr stanza appears in the combined status once DR
+    # replication is enabled. Vault Community cannot enable DR (404), so
+    # this row is annotated Enterprise-only and keeps the TV-faithful
+    # expectation.
     request: {method: GET, path: /v1/sys/replication/status}
     no_auth: true
     expect:
@@ -70,8 +74,8 @@ cases:
   - id: dr-status-after-disable
     request: {method: GET, path: /v1/sys/replication/dr/status}
     no_auth: true
-    expect: {status: 200, exact: {data: {}}}
+    expect: {status: 200, exact: {data: {mode: disabled}}}
   - id: combined-status-after-disable
     request: {method: GET, path: /v1/sys/replication/status}
     no_auth: true
-    expect: {status: 200, exact: {data: {}}}
+    expect: {status: 200, exact: {data: {mode: disabled}}}

@@ -12,7 +12,14 @@ notes: >-
   The fork implements the documented configuration surface: group_by
   validation (ip/none/entity_then_ip/entity_then_none; empty → ip),
   secondary_rate only allowed for the entity_then_* modes and defaulting
-  to rate when unset or zero. Enforcement is also implemented: requests
+  to rate when unset or zero. Both binaries validate grouping mode BEFORE
+  secondary_rate (verified live: group_by=bogus with secondary_rate set
+  yields "invalid grouping mode ...", not the secondary_rate error). The
+  entity_then_* modes and secondary_rate are docs-Enterprise; Vault
+  Community enterprise-gates them ("grouping mode X is only available in
+  Vault Enterprise") before path validation, so the entity-mode and
+  enforcement rows below are annotated Enterprise-only (TV keeps the
+  docs-faithful expectations). Enforcement is also implemented: requests
   carrying an entity (resolved from the request token) bucket by entity
   ID at the primary rate; requests without an entity bucket by IP
   (entity_then_ip) or into a single shared bucket (entity_then_none) at
@@ -58,6 +65,9 @@ cases:
       method: POST
       path: /v1/sys/quotas/rate-limit/rlq-none
       body: {rate: 100, group_by: none, path: rlq-kv/data/a}
+    # docs-Enterprise: group_by none is Enterprise. Vault Community
+    # enterprise-gates the mode ("grouping mode \"none\" is only available in
+    # Vault Enterprise", 400); TV implements the docs surface.
     expect:
       status: [204]
   - id: read-none-mode
@@ -74,7 +84,7 @@ cases:
       body: {rate: 100, group_by: bogus}
     expect:
       status: [400]
-      errors_contain: ["invalid group_by"]
+      errors_contain: ["invalid grouping mode \"bogus\""]
   - id: create-secondary-with-ip-rejected
     request:
       method: POST
@@ -82,7 +92,11 @@ cases:
       body: {rate: 100, group_by: ip, secondary_rate: 5}
     expect:
       status: [400]
-      errors_contain: ["secondary_rate requires entity_then_ip or entity_then_none"]
+      errors_contain: ["secondary rate is only valid when using entity-based grouping"]
+  # Enterprise-only from here through read-after-update: the entity_then_*
+  # group_by modes (and secondary_rate) are Enterprise. Community
+  # enterprise-gates the mode before path validation; TV accepts the docs
+  # surface. Expectations stay TV-faithful.
   - id: create-entity-ip-defaults-secondary
     request:
       method: POST
@@ -126,6 +140,10 @@ cases:
       status: [200]
       exact: {data.rate: 5, data.secondary_rate: 5}
   - id: create-secondary-negative-rejected
+    # Enterprise-gated mode: Community rejects the entity_then_none group_by
+    # before reaching the secondary_rate validation ("grouping mode
+    # \"entity_then_none\" is only available in Vault Enterprise"); TV
+    # validates secondary_rate per docs.
     request:
       method: POST
       path: /v1/sys/quotas/rate-limit/rlq-neg
@@ -175,6 +193,9 @@ cases:
       token: auth.client_token
       ent: auth.entity_id
   - id: enforcement-quota
+    # Entity-based grouping (docs-Enterprise): Community enterprise-gates
+    # the mode; TV enforces per docs (entity bucket at the primary rate,
+    # shared none bucket at the secondary rate).
     request:
       method: POST
       path: /v1/sys/quotas/rate-limit/rlq-enforce

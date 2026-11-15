@@ -22,6 +22,13 @@ notes: |
   Assertions cover configuration acceptance/validation, NOT emitted log semantics.
   Cleanup is unconditional, including names used in negative tests, and does not
   delete server-side log files. Preserve/remove those separately after inspection.
+
+  docs-Enterprise annotation (R5 audit S-10): the fallback / filter /
+  exclude options are Enterprise audit-filtering features. Vault Community
+  refuses devices that supply them with 400 "enterprise-only options
+  supplied: invalid configuration" (unknown options are still accepted);
+  TV implements the documented options. Expectations stay TV-faithful:
+  Community FAILs on the option-bearing rows are its enterprise-gate gaps.
 cases:
   - id: audit-enable-fallback
     request:

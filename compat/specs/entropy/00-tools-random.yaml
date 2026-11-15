@@ -220,7 +220,7 @@ cases:
       path: /v1/sys/tools/random/seal/131073
     expect:
       status: [400]
-      errors_contain: ["'bytes' should be less than"]
+      errors_contain: ["bytes cannot be more than 131072 if sourced from seal.  Use drbg mode instead"]
   - id: random-platform-cap-exceeded
     request:
       method: POST
@@ -228,7 +228,7 @@ cases:
       body: {bytes: 10485761}
     expect:
       status: [400]
-      errors_contain: ["'bytes' should be less than"]
+      errors_contain: ["\"bytes\" must be less than 10485760"]
   - id: random-bytes-zero
     request:
       method: POST
@@ -236,7 +236,7 @@ cases:
       body: {bytes: 0}
     expect:
       status: [400]
-      errors_contain: ["'bytes' cannot be less than 1"]
+      errors_contain: ["\"bytes\" cannot be less than 1"]
   - id: random-bytes-negative
     request:
       method: POST
@@ -244,14 +244,14 @@ cases:
       body: {bytes: -5}
     expect:
       status: [400]
-      errors_contain: ["'bytes' cannot be less than 1"]
+      errors_contain: ["\"bytes\" cannot be less than 1"]
   - id: random-source-invalid-url
     request:
       method: POST
       path: /v1/sys/tools/random/bogus/32
     expect:
       status: [400]
-      errors_contain: ["unsupported entropy source"]
+      errors_contain: ["unsupported entropy source \"bogus\"; must be \"platform\" or \"seal\", or \"all\""]
   - id: random-source-invalid-body
     request:
       method: POST
@@ -266,7 +266,7 @@ cases:
       body: {drbg: bogus}
     expect:
       status: [400]
-      errors_contain: ["unsupported drbg mode"]
+      errors_contain: ["invalid setting for drbg, must absent, auto, or hmacdrbg"]
   - id: random-format-invalid
     request:
       method: POST
@@ -274,4 +274,4 @@ cases:
       body: {format: bogus}
     expect:
       status: [400]
-      errors_contain: ["unsupported encoding format"]
+      errors_contain: ["unsupported encoding format \"bogus\"; must be \"hex\" or \"base64\""]

@@ -21,6 +21,24 @@ notes: |
   seed bytes 00..1f, message UTF-8 'compat-transit-message', SHA-512 prehash, empty
   signature context. Only the public key and test signature are imported/published.
   See notes.md for OpenBao capability differences and protocol/fixture gaps.
+
+  docs-Enterprise annotations (R5 audit S-09): Vault Community 404s (or
+  rejects) the enterprise-only parts of this surface while TelnyxVault
+  implements the documented contract. Community texts, verified live:
+  - mounting with external_entropy_access is refused on some Community
+    versions (400); when the mount already exists from an earlier run the
+    row fails with the "already in use" 400 — run the suite on a fresh
+    target.
+  - POST keys {type: managed_key} → 500 multierror
+    "1 error occurred:\n\t* managed keys are supported within enterprise
+    edition only\n\n" (the hyphen variant {type: managed-key} yields 400
+    "unknown key type managed-key").
+  - CMAC/CBC/PQC key creation (aes*-cmac, aes*-cbc, ml-dsa, hybrid,
+    slh-dsa) → 400 "key type X is only available in enterprise versions
+    of Vault"; the typed sign/verify/export/encrypt rows never run past
+    their creation dependencies on Community.
+  Expectations stay TV-faithful (docs-faithful); Community failures on
+  the annotated rows are its enterprise-gate gaps, not spec errors.
 cases:
   - id: mount-enable
     request:
@@ -28,6 +46,10 @@ cases:
       path: /v1/sys/mounts/compat-transit-ent
       body: {type: transit, external_entropy_access: true}
     expect: {status: [200, 204]}
+  # Enterprise-only: managed keys require a provisioned KMS/HSM reference.
+  # Vault Community rejects the creation itself with 500 "managed keys are
+  # supported within enterprise edition only"; TV reaches the documented
+  # missing-reference validation (400). Expectation stays TV-faithful.
   - id: managed-key-missing-reference
     depends: [mount-enable]
     request: {method: POST, path: /v1/compat-transit-ent/keys/compat-transit-invalid, body: {type: managed_key}}
@@ -37,6 +59,10 @@ cases:
         type: object
         required: [errors]
         properties: {errors: {type: array, items: {type: string}}}
+  # Enterprise-only from here through slhdsa-read: CMAC/CBC/PQC key types
+  # are gated in Vault Community ("key type X is only available in
+  # enterprise versions of Vault"); TV implements the documented types.
+  # Expectations stay TV-faithful.
   - id: cmac128-create
     depends: [mount-enable]
     request:

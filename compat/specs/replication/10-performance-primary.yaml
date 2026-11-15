@@ -58,6 +58,10 @@ cases:
               last_reindex_epoch: {type: string}
               primary_cluster_addr: {type: string, pattern: '^https?://'}
   - id: perf-combined-status-shows-performance
+    # docs-Enterprise: the typed stanzas appear once performance replication
+    # is enabled. Vault Community cannot enable replication (404 at enable),
+    # so this row is annotated Enterprise-only and keeps the TV-faithful
+    # expectation.
     request: {method: GET, path: /v1/sys/replication/status}
     no_auth: true
     expect:
@@ -179,4 +183,4 @@ cases:
   - id: perf-status-after-disable
     request: {method: GET, path: /v1/sys/replication/performance/status}
     no_auth: true
-    expect: {status: 200, exact: {data: {}}}
+    expect: {status: 200, exact: {data: {mode: disabled}}}

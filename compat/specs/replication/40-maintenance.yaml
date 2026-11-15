@@ -24,6 +24,9 @@ cases:
       path: /v1/sys/replication/dr/primary/enable
     expect: {status: 204}
   - id: combined-status-shows-both
+    # docs-Enterprise: both stanzas appear once both streams are enabled.
+    # Vault Community cannot enable replication (404), so this row is
+    # annotated Enterprise-only and keeps the TV-faithful expectation.
     request: {method: GET, path: /v1/sys/replication/status}
     no_auth: true
     expect:
@@ -151,4 +154,4 @@ cases:
   - id: maintenance-status-clean
     request: {method: GET, path: /v1/sys/replication/status}
     no_auth: true
-    expect: {status: 200, exact: {data: {}}}
+    expect: {status: 200, exact: {data: {mode: disabled}}}

@@ -1,0 +1,179 @@
+# SPDX-License-Identifier: MPL-2.0
+api: multi-node
+feature: core-multi-node
+source: live Vault 2.2.1 raft lab probes (2026-11-14, /tmp/vault-lab)
+notes: |
+  Multi-node Integrated Storage surfaces probed on the 3-node Vault 2.2.1
+  raft lab (node1 leader 16320, node2/3 standbys, TelnyxVault joined as
+  voter tv-join-1). These shapes hold for HA/raft-backed targets; the
+  single-node dev oracle (inmem) serves only {ha_enabled:false} for
+  sys/leader and has no raft configuration surface, so they are gated on
+  raft targets. Run against a raft-backed TelnyxVault (config mode with
+  storage "raft", or the lab TV standby).
+
+  Environment-dependent behavior observed on the oracle and mirrored by TV:
+  - sys/leader is_self: true on a self-elected single-node raft store
+    (active_time = real activation timestamp); false on a standby with
+    active_time = Go zero time "0001-01-01T00:00:00Z".
+  - sys/ha-status nodes[] last_echo: null on the active node, RFC3339 on
+    standbys; TV relays the leader's view (forwarded like the oracle).
+
+  Single-node dev-server compatibility (R5 audit S-13): the dev server
+  (inmem storage on both binaries) omits raft_committed_index /
+  raft_applied_index on sys/leader and reports ha_enabled: false, so
+  leader-ha-raft-shape asserts the common leader shape with the raft
+  index fields as optional raft-gated properties; the raft-gated
+  guarantees (ha_enabled: true, performance_standby: false, raft index
+  monotonicity) remain pinned on raft labs via the configuration rows
+  below. A 200 from a non-raft dev server vacuously passes the optional
+  properties; the raft-gated const assertions belong to raft targets.
+
+  docs-Enterprise annotations (R5 audit S-15): the ha-status surface in
+  this file is probed against Enterprise lab shapes; Vault Community
+  serves a lowercase `nodes` array without upgrade_version /
+  redundancy_zone, while the docs (and TV) use top-level `Nodes` with
+  per-node `upgrade_version` (automated upgrades are an Enterprise
+  feature). upgrade_version in the ha-status shape below is therefore
+  docs-Enterprise: Community omits the field and FAILs the shape rows;
+  keep TV-faithful expectations and reconcile every Nodes/nodes spelling
+  in this file to the docs form `Nodes` (the redundancy suite pins the
+  identical shape).
+cases:
+  - id: leader-ha-raft-shape
+    # Gated on raft storage: the raft index fields are only served when
+    # storage is raft. Single-node dev servers (inmem on both binaries)
+    # omit them and report ha_enabled: false, so this shape asserts the
+    # common leader fields and treats the raft fields as optional; the
+    # raft-gated contracts (ha_enabled: true, single-leader configuration)
+    # are pinned by raft-configuration-* below on raft labs.
+    request: {method: GET, path: /v1/sys/leader}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [ha_enabled, is_self, active_time, leader_address, leader_cluster_address, performance_standby, performance_standby_last_remote_wal]
+        properties:
+          ha_enabled: {type: boolean}
+          is_self: {type: boolean}
+          active_time: {type: string}
+          leader_address: {type: string}
+          leader_cluster_address: {type: string}
+          performance_standby: {type: boolean}
+          performance_standby_last_remote_wal: {type: integer}
+          raft_committed_index: {type: integer}
+          raft_applied_index: {type: integer}
+  # sys/storage/raft/configuration — config.servers[] entries carry
+  # node_id/address/leader/protocol_version/voter (probed live). The oracle
+  # wraps the config in `data`; body_schema validates the whole body.
+  - id: raft-configuration-shape
+    request: {method: GET, path: /v1/sys/storage/raft/configuration}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [data]
+        properties:
+          data:
+            type: object
+            required: [config]
+            properties:
+              config:
+                type: object
+                required: [servers]
+                properties:
+                  servers:
+                    type: array
+                    items:
+                      type: object
+                      required: [node_id, address, leader, protocol_version, voter]
+                      properties:
+                        node_id: {type: string}
+                        address: {type: string}
+                        leader: {type: boolean}
+                        protocol_version: {const: "3"}
+                        voter: {type: boolean}
+  # exactly one server reports leader=true; the local node id/address appear
+  # in the config
+  - id: raft-configuration-single-leader
+    request: {method: GET, path: /v1/sys/storage/raft/configuration}
+    expect:
+      status: 200
+      contains:
+        data.config.servers[].leader: [true]
+        data.config.servers[].protocol_version: ["3"]
+  # sys/ha-status — Nodes[] entries (the docs-Enterprise spelling; the
+  # redundancy suite pins the same shape — see redundancy/sys-ha-status.yaml);
+  # active_node exactly once cluster-wide; last_echo null on the active
+  # node (probed live). TV additionally emits a lowercase `nodes` mirror —
+  # accepted, not asserted.
+  - id: ha-status-shape
+    request: {method: GET, path: /v1/sys/ha-status}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [Nodes]
+        properties:
+          Nodes:
+            type: array
+            items:
+              type: object
+              required: [hostname, api_address, cluster_address, active_node, last_echo, version, upgrade_version, echo_duration_ms, clock_skew_ms, replication_primary_canary_age_ms]
+              properties:
+                hostname: {type: string}
+                api_address: {type: string}
+                cluster_address: {type: string}
+                active_node: {type: boolean}
+                version: {type: string}
+                upgrade_version: {type: string}
+                echo_duration_ms: {type: integer}
+                clock_skew_ms: {type: integer}
+                replication_primary_canary_age_ms: {type: integer}
+  # the local node appears in the list with a Vault-shaped version; the
+  # api_address carries the scheme
+  - id: ha-status-local-node-present
+    request: {method: GET, path: /v1/sys/ha-status}
+    expect:
+      status: 200
+      body_schema:
+        type: object
+        required: [Nodes]
+        properties:
+          Nodes:
+            type: array
+            items:
+              type: object
+              properties:
+                api_address: {type: string, pattern: "^http"}
+                version: {type: string}
+  # sys/raft/autopilot/state — Vault 2.2.1 serves autopilot state only
+  # through the CLI's internal channel; the HTTP surface on BOTH leader and
+  # standby returns 404 "unsupported path" (probed live, 2026-11-14)
+  - id: autopilot-state-http
+    request: {method: GET, path: /v1/sys/raft/autopilot/state}
+    expect:
+      status: 404
+      errors_contain: ["unsupported path"]
+  # sys/raft/autopilot/configuration — 404 unsupported path on this binary
+  # (probed live: leader AND standby)
+  - id: autopilot-configuration-http
+    request: {method: GET, path: /v1/sys/raft/autopilot/configuration}
+    expect:
+      status: 404
+      errors_contain: ["unsupported path"]
+  # ALWAYS-REDIRECT semantics — sys/storage/raft/snapshot is an
+  # alwaysRedirectPaths entry (Vault path manager, prefix match: the -acl
+  # variant 307s too). Requires a standby (follower role) target; a
+  # single-node leader serves locally.
+  - id: snapshot-redirect-standby
+    request: {method: GET, path: /v1/sys/storage/raft/snapshot}
+    expect:
+      status: [200, 307]
+  # prefix matching of alwaysRedirectPaths — any sys/storage/raft/snapshot*
+  # path 307s on a standby (probed live: snapshot-acl). Single-node leaders
+  # serve locally (404 unsupported path is also acceptable on followers
+  # without a handler).
+  - id: snapshot-acl-prefix-redirect
+    request: {method: GET, path: /v1/sys/storage/raft/snapshot-acl}
+    expect:
+      status: [200, 307, 404]

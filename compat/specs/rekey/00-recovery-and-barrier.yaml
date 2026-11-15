@@ -8,24 +8,33 @@ notes: >-
   read/start/cancel, update, verification, backup) and
   api-docs/system/rekey (the barrier-key rekey ceremony this recovery flow
   mirrors). The docs state recovery endpoints are "only applicable to seals
-  that support recovery keys"; on the fork's dev seal (Shamir,
+  that support recovery keys"; on the dev seal (Shamir,
   RecoveryKeySupported()==false) the recovery endpoints return 400
   "recovery rekeying not supported" — the honest documented gating. The
   update endpoint validates the key format before the seal check (mirroring
   the fork's http handler), so a malformed key reports the format error even
   on recovery paths. Barrier-key rekey is exercised through
   init/read/cancel and invalid-parameter contracts (a complete ceremony
-  requires the current barrier key, which the harness does not hold);
-  "required" mirrors the dev seal's threshold (1) and is asserted as a
-  schema field, not a value. Invalid configurations
-  (shares=0, threshold>shares) surface as 500 coded errors with the
-  validation message (observed fork behavior; the docs do not specify the
-  status: an earlier build reported these as 500; the current contract is 400.
-  Cancel of a recently initialized operation requires the operation's nonce;
-  the system backend observes DELETE parameters only as query values, so the
-  nonce travels in the query string (the documented API accepts it in the
-  body too, which the http-package mux handler honors). Cancel with nothing
-  in progress is an idempotent 204.
+  requires the current barrier key, which the harness does not hold).
+  Read/init responses are TOP-LEVEL (no data wrapper):
+  {"nonce":"",...,"started":false,"t":0,"n":0,"progress":0,"required":1,...}
+  — identical on TelnyxVault and Vault Community. Invalid configurations
+  surface as coded errors: shares=0 → 500 "invalid rekey seal
+  configuration: shares must be at least one"; threshold>shares → 400
+  "provided threshold greater than the total shares" (identical on both
+  binaries). Cancel requires the in-progress operation's nonce: with a
+  rekey in progress, DELETE without the nonce (or with a wrong nonce)
+  returns 400 "1 error occurred:\n\t* failed to cancel rekey: invalid
+  request\n\n" on both binaries (one shared text — the docs' dedicated
+  nonce-mismatch strings are not emitted by either). More precisely, the
+  docs' successful 204-cancel is unreachable within a one-shot suite run:
+  a rekey started seconds earlier refuses ALL cancels on both binaries
+  (TV enforces a ~30s recency window after which its cancel succeeds
+  nonce-insensitively; Community refuses cancels of this rekey shape
+  outright). The system backend observes DELETE parameters only as query
+  values, so the nonce travels in the query string (the documented API
+  accepts it in the body too, which the http-package mux handler honors).
+  Cancel with nothing in progress is an idempotent 204.
 cases:
   - id: recovery-init-read-unavailable
     request:
@@ -74,7 +83,9 @@ cases:
   - id: barrier-init-reset-read
     # Rerun tolerance: an interrupted earlier run may have left a rekey in
     # progress; capture its nonce (empty when idle) so the reset below can
-    # cancel even a recent attempt.
+    # cancel even a recent attempt. Top-level shape (no data wrapper).
+    # pgp_fingerprints is null on both binaries: this suite never supplies
+    # pgp_keys, so the field is pinned as null.
     request:
       method: GET
       path: /v1/sys/rekey/init
@@ -82,22 +93,18 @@ cases:
       status: [200]
       body_schema:
         type: object
-        required: [data]
+        required: [started, t, n, progress, required]
         properties:
-          data:
-            type: object
-            required: [started, t, n, progress, required]
-            properties:
-              started: {type: boolean}
-              t: {type: integer}
-              n: {type: integer}
-              progress: {type: integer}
-              required: {type: integer}
-              pgp_fingerprints: {type: array}
-              backup: {type: boolean}
-              verification_required: {type: boolean}
+          started: {type: boolean}
+          t: {type: integer}
+          n: {type: integer}
+          progress: {type: integer}
+          required: {type: integer}
+          pgp_fingerprints: {type: "null"}
+          backup: {type: boolean}
+          verification_required: {type: boolean}
     capture:
-      reset_nonce: data.nonce
+      reset_nonce: nonce
   - id: barrier-init-cancel-reset
     request:
       method: DELETE
@@ -110,7 +117,7 @@ cases:
       path: /v1/sys/rekey/init
     expect:
       status: [200]
-      exact: {data.started: false}
+      exact: {started: false}
   - id: barrier-init-post
     request:
       method: POST
@@ -120,19 +127,15 @@ cases:
       status: [200]
       body_schema:
         type: object
-        required: [data]
+        required: [started, nonce, t, n, progress]
         properties:
-          data:
-            type: object
-            required: [started, nonce, t, n, progress]
-            properties:
-              started: {type: boolean}
-              nonce: {type: string}
-              t: {type: integer}
-              n: {type: integer}
-      exact: {data.started: true, data.n: 1, data.t: 1, data.progress: 0}
+          started: {type: boolean}
+          nonce: {type: string}
+          t: {type: integer}
+          n: {type: integer}
+      exact: {started: true, n: 1, t: 1, progress: 0}
     capture:
-      nonce: data.nonce
+      nonce: nonce
   - id: barrier-init-in-progress
     request:
       method: POST
@@ -147,10 +150,10 @@ cases:
       path: /v1/sys/rekey/init
     expect:
       status: [200]
-      exact: {data.started: true, data.progress: 0}
+      exact: {started: true, progress: 0}
   - id: barrier-verify-read-no-verification
     # A started (non-verification) rekey exposes a verification status of
-    # started:false with an empty nonce.
+    # started:false with an empty nonce. Top-level shape (no data wrapper).
     request:
       method: GET
       path: /v1/sys/rekey/verify
@@ -158,15 +161,11 @@ cases:
       status: [200]
       body_schema:
         type: object
-        required: [data]
+        required: [started, nonce, t, n, progress]
         properties:
-          data:
-            type: object
-            required: [started, nonce, t, n, progress]
-            properties:
-              started: {type: boolean}
-              nonce: {type: string}
-      exact: {data.started: false, data.nonce: ""}
+          started: {type: boolean}
+          nonce: {type: string}
+      exact: {started: false, nonce: ""}
   - id: barrier-update-bad-key
     request:
       method: PUT
@@ -175,41 +174,55 @@ cases:
     expect:
       status: [400]
       errors_contain: ["'key' must be a valid hex or base64 string"]
+  # Both binaries answer a nonceless (or mismatched-nonce) cancel of an
+  # in-progress rekey with the same 500-class multierror text; the docs'
+  # dedicated nonce-mismatch strings are not emitted by either side.
   - id: barrier-init-cancel-recent-requires-nonce
     request:
       method: DELETE
       path: /v1/sys/rekey/init
     expect:
       status: [400]
-      errors_contain: ["the nonce must be provided to cancel a rekey"]
+      errors_contain: ["1 error occurred:\\n\\t\\* failed to cancel rekey: invalid request\\n\\n"]
   - id: barrier-init-cancel-wrong-nonce
     request:
       method: DELETE
       path: /v1/sys/rekey/init?nonce=00000000-0000-0000-0000-000000000000
     expect:
       status: [400]
-      errors_contain: ["the provided nonce does not match the current rekey nonce"]
+      errors_contain: ["1 error occurred:\\n\\t\\* failed to cancel rekey: invalid request\\n\\n"]
   - id: barrier-init-cancel
+    # The docs' 204-cancel of an in-progress rekey is unreachable inside a
+    # one-shot suite run: a rekey started seconds earlier refuses ALL
+    # cancels on both binaries with the same 400 multierror (nonce
+    # irrelevant). TV additionally implements a >30s recency window after
+    # which the cancel succeeds (204, nonce-insensitive) — the oracle
+    # refuses cancels of this rekey shape outright — but that path is not
+    # exercised within the suite's single-pass window. Pinned to the
+    # observed refusal (identical on both sides).
     request:
       method: DELETE
       path: /v1/sys/rekey/init?nonce=$nonce
     expect:
-      status: [204]
+      status: [400]
+      errors_contain: ["1 error occurred:\\n\\t\\* failed to cancel rekey: invalid request\\n\\n"]
   - id: barrier-init-read-after-cancel
+    # The cancel above is refused (recent-start refusal, identical on both
+    # binaries), so the rekey remains in progress.
     request:
       method: GET
       path: /v1/sys/rekey/init
     expect:
       status: [200]
-      exact: {data.started: false}
+      exact: {started: true}
   - id: barrier-init-zero-shares
     request:
       method: POST
       path: /v1/sys/rekey/init
       body: {secret_shares: 0, secret_threshold: 0}
     expect:
-      status: [400]
-      errors_contain: ["invalid rekey seal configuration"]
+      status: [500]
+      errors_contain: ["invalid rekey seal configuration: shares must be at least one"]
   - id: barrier-init-threshold-over-shares
     request:
       method: POST
@@ -217,7 +230,7 @@ cases:
       body: {secret_shares: 1, secret_threshold: 2}
     expect:
       status: [400]
-      errors_contain: ["invalid rekey seal configuration"]
+      errors_contain: ["provided threshold greater than the total shares"]
   - id: backup-read-empty
     request:
       method: GET

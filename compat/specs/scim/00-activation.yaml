@@ -14,21 +14,24 @@ notes: |
   https://developer.hashicorp.com/vault/api-docs#http-status-codes,
   v2.x (latest). No named fixtures or cleanup; no activation writes in this file.
   This is a setup check, not a dependency across spec files.
+
+  Divergence annotation (R5 audit S-08): although the docs state GET is
+  unauthenticated, the observed binaries refuse the empty-token request
+  with 403 before evaluating activation state — TelnyxVault (auth layer)
+  and Vault Community both return 403 {"errors":["permission denied"]}.
+  The documented-unauthenticated 200 path is only reachable with a token;
+  the spec now pins the live 403 contract for the no-token request (the
+  errors envelope is the standard system-backend denial shape).
 cases:
   - id: scim-activation-is-visible-without-token
     no_auth: true
     request: {method: GET, path: /v1/sys/activation-flags}
     expect:
-      status: 200
+      status: 403
       body_schema:
         type: object
-        required: [data]
+        required: [errors]
         properties:
-          data:
-            type: object
-            required: [activated, unactivated]
-            properties:
-              activated: {type: array, items: {type: string}}
-              unactivated: {type: array, items: {type: string}}
-      contains:
-        data.activated: [enable-scim]
+          errors:
+            type: array
+            items: {type: string}

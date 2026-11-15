@@ -25,6 +25,15 @@ notes: >-
   ties to the userpass accessor; userpass enablement is tolerant of an
   already-enabled mount because other suites in a full run may enable it
   first. Cleanup leaves userpass enabled on purpose.
+
+  docs-Enterprise annotation (R5 audit): Vault Community 404s the
+  sys/mfa surface and gates the `mfa_requirements` policy attribute with
+  an HCL parse error ('invalid key "mfa_requirements" on line 0'), so the
+  mfa_requirements policy rows (create-policy-all, create-policy-any,
+  read-policy-all, read-policy-any) and the denial-text rows below are
+  Enterprise-only: TV implements the documented surface and PASSes while
+  Community FAILs (or FEATURE_ABSENTs). Expectations stay TV-faithful
+  (docs-faithful); Community failures are its enterprise-gate gaps.
 cases:
   - id: mount-setup
     request:
