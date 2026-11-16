@@ -45,9 +45,12 @@ notes: |
     live database connection and 500-multierrors against the unreachable
     fixture, while TV validates statically per docs. Expectations stay
     TV-faithful.
-  - The ldap-auth-exclusive row retains its documented 400 class; TV
-    currently emits the same text with 500 (P5.12 residual, TV-side fix
-    out of scope for this re-pin).
+  - R6 re-pin: the ldap-auth-exclusive row asserts the observed 500
+    multierror class. Vault Community 2.2.1 and 2.2.2 and TV all return
+    500 with the identical documented mutual-exclusion text; the
+    docs-derived 400 pin (R5 residual P5.12) is retired. The
+    aws/azure/gcp/database exclusivity rows keep 400: real Vault returns
+    400 on those config surfaces (oracle-verified).
 cases:
   - id: ldap-auth-mount
     request: {method: POST, path: /v1/sys/auth/compat-pr-ldap, body: {type: ldap}}
@@ -63,8 +66,8 @@ cases:
   - id: ldap-auth-exclusive
     depends: [ldap-auth-mount]
     request: {method: POST, path: /v1/auth/compat-pr-ldap/config, body: {url: 'ldap://127.0.0.1:1', rotation_period: 86400, rotation_schedule: '0 0 * * SAT', rotation_window: 0, disable_automated_rotation: true}}
-    expect: &invalid
-      status: 400
+    expect: &ldap-exclusive
+      status: 500
       body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
   - id: aws-auth-mount
     request: {method: POST, path: /v1/sys/auth/compat-pr-aws, body: {type: aws}}
@@ -80,7 +83,9 @@ cases:
   - id: aws-auth-exclusive
     depends: [aws-auth-mount]
     request: {method: POST, path: /v1/auth/compat-pr-aws/config/client, body: {<<: *aws-schedule, rotation_period: 86400, rotation_window: 0}}
-    expect: *invalid
+    expect: &invalid
+      status: 400
+      body_schema: {type: object, required: [errors], properties: {errors: {type: array, items: {type: string}}}}
   - id: aws-auth-period-window
     depends: [aws-auth-mount]
     request: {method: POST, path: /v1/auth/compat-pr-aws/config/client, body: {<<: *aws-schedule, rotation_schedule: '', rotation_period: 86400}}

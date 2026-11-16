@@ -108,7 +108,17 @@ go run . --target http://127.0.0.1:8200 \
 
 Targets: any Vault/OpenBao HTTP API — an OpenBao build, a Vault Community
 build, or (when legitimately licensed) a Vault Enterprise build. `--token`,
-`BAO_TOKEN`, or `VAULT_TOKEN` supply the `X-Vault-Token` header.
+`BAO_TOKEN`, or `VAULT_TOKEN` supply the `X-Vault-Token`.
+
+Canonical corpus totals come from the two-pass runner (whole corpus under
+the admin/root token, scim suite under the entity-bound actor token from
+`scim-fixture.sh`, results merged; FEATURE_ABSENT targets keep pass-1 scim
+rows):
+
+```sh
+ACTOR=$(./scripts/scim-fixture.sh http://127.0.0.1:8200 "$BAO_TOKEN") \
+  ./scripts/run-corpus.sh http://127.0.0.1:8200 "$BAO_TOKEN" "$ACTOR"
+```
 
 ## Roadmap
 

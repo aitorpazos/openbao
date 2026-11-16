@@ -43,7 +43,7 @@ Use a disposable initialized/unsealed licensed Enterprise target in the **root n
 
 1. Activate enable-scim once, with root-namespace authorization. The YAML deliberately does not make this irreversible change. No negative preactivation status is guessed.
 2. Create a dedicated entity and a SCIM client named `compat-scim-actor` using that generated entity ID as access_grant_principal. Follow the overview's token-auth alias/role workflow, or another documented auth method resolving to the entity. A normal root token is not a substitute for an entity-bound protocol token.
-3. Supply the entity-bound token as the harness run token. In this disposable environment it also needs management read/list/write/delete permissions for the fixture paths in addition to protocol ACLs. No credentials are embedded in specs.
+3. Supply the entity-bound token as the harness run token for the scim suite (scripts/run-corpus.sh runs the rest of the corpus under the admin/root token in a separate pass, because several suites pin root-only behavior). The token needs management read/list/write/delete permissions for the fixture paths in addition to protocol ACLs. No credentials are embedded in specs.
 4. Through that client, create the active user `compat-scim-user` with externalId `compat-scim-external-user`, and internal group `compat-scim-group`. Save all returned IDs externally. These fixtures keep collection reads and positive filters nonempty without inventing empty-result response contracts.
 
 Reserved names (must not collide with other workloads):
